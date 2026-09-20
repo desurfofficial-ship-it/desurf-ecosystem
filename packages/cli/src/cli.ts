@@ -20,7 +20,7 @@ Offline-first behavioral contracts for prompts & agents.
 
 Usage:
   desurf test    --suite <dir> [--case <id>] [--parallel]
-  desurf init    <dir>
+  desurf init    <dir> [--force]
   desurf seal    --suite <dir> [--force]
   desurf record  --suite <dir> --provider openrouter [--model <id>]
   desurf diff    --suite <dir> --case <id>
@@ -127,7 +127,14 @@ async function cmdTest(args: string[]) {
 }
 
 async function cmdInit(args: string[]) {
-  const dir = resolve(args[0] || ".");
+  const dir = resolve(args[0] || "desurf-suite");
+  try {
+    await readFile(join(dir, "suite.json"), "utf8");
+    if (!args.includes("--force")) {
+      console.error(`Desurf: suite already exists at ${dir} (pass --force to overwrite)`);
+      process.exit(2);
+    }
+  } catch {}
   await mkdir(join(dir, "prompts"), { recursive: true });
   await mkdir(join(dir, "inputs"), { recursive: true });
   await mkdir(join(dir, "outputs"), { recursive: true });
@@ -221,6 +228,7 @@ async function cmdSeal(args: string[]) {
       } catch {}
     }
     const fp = makeFingerprint(prompt, input, "SEALED");
+    await mkdir(join(outPath, ".."), { recursive: true });
     await writeFile(side, JSON.stringify(fp, null, 2));
     console.log(`sealed ${tc.id}`);
   }
@@ -296,13 +304,20 @@ async function cmdDiff(args: string[]) {
   const suite = await loadSuite(suiteDir);
   const tc = suite.cases.find((c) => c.id === caseId);
   if (!tc) {
-    console.error(`case not found: ${caseId}`);
+    console.error(`Desurf: case not found: ${caseId}`);
     process.exit(2);
   }
-  const out = await readFile(join(suiteDir, tc.output), "utf8").catch(() => "(missing)");
+  let outPath: string;
+  try {
+    outPath = containPath(suiteDir, tc.output, "output");
+  } catch (e: any) {
+    console.error(e?.message || e);
+    process.exit(2);
+  }
+  const out = await readFile(outPath, "utf8").catch(() => "(missing)");
   let fp: any = null;
   try {
-    fp = JSON.parse(await readFile(join(suiteDir, tc.output + ".desurf"), "utf8"));
+    fp = JSON.parse(await readFile(outPath + ".desurf", "utf8"));
   } catch {}
   console.log(`Case: ${caseId}`);
   console.log(`State: ${fp?.state || "UNSEALED"}`);
