@@ -17,7 +17,7 @@ import {
 } from "desurf-core";
 
 /** CLI package version — keep in sync with packages/cli/package.json */
-const CLI_VERSION = "2.5.3";
+const CLI_VERSION = "2.5.4";
 
 type DesurfConfig = {
   suites?: string[];
@@ -413,10 +413,12 @@ async function cmdTest(args: string[]) {
 }
 
 async function cmdInit(args: string[]) {
-  const dir = resolve(args[0] || "desurf-suite");
+  const force = args.includes("--force");
+  const dirArg = args.find((a) => a && !a.startsWith("-"));
+  const dir = resolve(dirArg || "desurf-suite");
   try {
     await readFile(join(dir, "suite.json"), "utf8");
-    if (!args.includes("--force")) {
+    if (!force) {
       console.error(`Desurf: suite already exists at ${dir} (pass --force to overwrite)`);
       process.exit(2);
     }

@@ -8,7 +8,7 @@ import { execSync } from "node:child_process";
 import { join, resolve, relative, dirname } from "node:path";
 import { runSuite, makeFingerprint, checkDrift, VERSION, containPath, } from "desurf-core";
 /** CLI package version — keep in sync with packages/cli/package.json */
-const CLI_VERSION = "2.5.3";
+const CLI_VERSION = "2.5.4";
 // Expand simple globs: packages/*/contracts or apps/**/contracts
 async function expandSuitePatterns(patterns, cwd) {
     const out = [];
@@ -412,10 +412,12 @@ async function cmdTest(args) {
     process.exit(worstExit);
 }
 async function cmdInit(args) {
-    const dir = resolve(args[0] || "desurf-suite");
+    const force = args.includes("--force");
+    const dirArg = args.find((a) => a && !a.startsWith("-"));
+    const dir = resolve(dirArg || "desurf-suite");
     try {
         await readFile(join(dir, "suite.json"), "utf8");
-        if (!args.includes("--force")) {
+        if (!force) {
             console.error(`Desurf: suite already exists at ${dir} (pass --force to overwrite)`);
             process.exit(2);
         }
