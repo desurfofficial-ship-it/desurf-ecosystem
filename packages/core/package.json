@@ -4,7 +4,9 @@
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
-  "exports": { ".": "./dist/index.js" },
+  "exports": {
+    ".": "./dist/index.js"
+  },
   "scripts": {
     "build": "tsc",
     "test": "node --experimental-vm-modules node_modules/vitest/vitest.mjs run 2>/dev/null || echo 'vitest optional'"
@@ -12,5 +14,12 @@
   "devDependencies": {
     "typescript": "^5.7.2",
     "@types/node": "^22.10.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/desurfofficial-ship-it/desurf-ecosystem.git"
   }
 }
