@@ -8,7 +8,7 @@ import { execSync } from "node:child_process";
 import { join, resolve, relative, dirname } from "node:path";
 import { runSuite, makeFingerprint, checkDrift, VERSION, containPath, } from "desurf-core";
 /** CLI package version — keep in sync with packages/cli/package.json */
-const CLI_VERSION = "2.6.0";
+const CLI_VERSION = "2.6.1";
 // Expand simple globs: packages/*/contracts or apps/**/contracts
 async function expandSuitePatterns(patterns, cwd) {
     const out = [];
@@ -763,34 +763,50 @@ async function cmdMutate(args) {
 }
 async function cmdBadge(args) {
     const suiteDir = await resolveSuiteDir(args);
+    const cfg = await loadConfig();
     let status = "unknown";
     let color = "lightgrey";
     let exit = 0;
     try {
         const suite = await loadSuite(suiteDir);
         const result = await runSuite(suiteDir, suite, { parallel: true });
-        exit = result.exitCode;
-        if (result.exitCode === 0) {
+        // Badge policy: unsealed cassettes are not "passing" (honest CI signal)
+        const unsealed = result.results.filter((r) => r.cassetteState === "UNSEALED");
+        if (unsealed.length > 0 && result.exitCode === 0) {
+            exit = 2;
+            status = "unsealed";
+            color = "orange";
+        }
+        else if (result.exitCode === 0) {
+            exit = 0;
             status = "passing";
             color = "brightgreen";
         }
         else if (result.exitCode === 1) {
-            status = "regression";
-            color = "orange";
+            exit = 1;
+            status = "failing";
+            color = "red";
         }
         else {
+            exit = result.exitCode;
             status = "error";
             color = "red";
         }
+        if (cfg.failUnsealed && unsealed.length > 0) {
+            exit = 2;
+            status = "unsealed";
+            color = "orange";
+        }
     }
     catch (e) {
+        exit = 2;
         status = "error";
         color = "red";
-        exit = 2;
+        console.error(e?.message || e);
     }
-    const label = "desurf";
-    const url = `https://img.shields.io/badge/${label}-${status}-${color}`;
-    console.log(`![desurf](${url})`);
+    const label = encodeURIComponent("desurf");
+    const message = encodeURIComponent(status);
+    console.log(`![desurf](https://img.shields.io/badge/${label}-${message}-${color})`);
     console.log(`<!-- desurf-badge status=${status} exit=${exit} -->`);
     console.log(`\nMarkdown ready. Drop into README. Contracts: ${status}.`);
     process.exit(exit);
