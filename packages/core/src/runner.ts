@@ -105,9 +105,12 @@ export async function runCase(
   try {
     validateCaseId(tc.id);
     if (tc.assertions != null && !Array.isArray(tc.assertions)) {
-      throw new Error(`Desurf: case "${tc.id}" assertions must be an array`);
+      throw new Error(`Desurf: case "${tc.id}" assertions must be an array (got ${typeof tc.assertions})`);
     }
-    if (Array.isArray(tc.assertions) && tc.assertions.length > 200) {
+    if (tc.assertions == null) {
+      (tc as any).assertions = [];
+    }
+    if (tc.assertions.length > 200) {
       throw new Error(`Desurf: case "${tc.id}" has ${tc.assertions.length} assertions (max 200)`);
     }
     const prompt = await loadText(suiteDir, tc.prompt, "prompt");

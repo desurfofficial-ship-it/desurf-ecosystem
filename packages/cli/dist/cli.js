@@ -3,12 +3,12 @@
  * Desurf Ecosystem CLI v2.0
  * Offline-first • Parallel • Typed judges (Jev-inspired) • Agent trajectories
  */
-import { readFile, writeFile, mkdir, readdir, access } from "node:fs/promises";
+import { readFile, writeFile, mkdir, readdir, access, stat } from "node:fs/promises";
 import { execSync } from "node:child_process";
 import { join, resolve, relative, dirname } from "node:path";
 import { runSuite, makeFingerprint, checkDrift, VERSION, containPath, } from "desurf-core";
 /** CLI package version — keep in sync with packages/cli/package.json */
-const CLI_VERSION = "2.6.1";
+const CLI_VERSION = "2.6.2";
 // Expand simple globs: packages/*/contracts or apps/**/contracts
 async function expandSuitePatterns(patterns, cwd) {
     const out = [];
@@ -438,6 +438,14 @@ async function cmdInit(args) {
     const force = args.includes("--force");
     const dirArg = args.find((a) => a && !a.startsWith("-"));
     const dir = resolve(dirArg || "contracts");
+    try {
+        const st = await stat(dir);
+        if (st.isFile()) {
+            console.error(`Desurf: cannot init suite — path is a file: ${dir}`);
+            process.exit(2);
+        }
+    }
+    catch { }
     try {
         await readFile(join(dir, "suite.json"), "utf8");
         if (!force) {
