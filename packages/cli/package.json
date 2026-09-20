@@ -1,18 +1,33 @@
 {
   "name": "desurf-cli",
-  "version": "2.3.4",
+  "version": "2.4.2",
   "type": "module",
   "bin": {
     "desurf": "./dist/cli.js"
   },
   "main": "./dist/cli.js",
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc"
   },
   "dependencies": {
-    "desurf-core": "file:../core"
+    "desurf-core": "^2.3.1"
   },
-  "files": [
-    "dist"
-  ]
+  "description": "Offline-first behavioral contracts for prompts & agents. CI regression gate with sealed provenance.",
+  "keywords": [
+    "llm",
+    "prompt",
+    "testing",
+    "regression",
+    "ci",
+    "agents",
+    "offline"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/desurfofficial-ship-it/desurf-ecosystem"
+  },
+  "license": "MIT"
 }

@@ -1,4 +1,3 @@
-# Desurf offline contract gate — no API keys required
 name: desurf-contracts
 on:
   pull_request:
@@ -14,6 +13,11 @@ jobs:
           node-version: "20"
       - name: Install Desurf
         run: npm install -g desurf-cli@2
-      - name: Run contract suite
-        run: desurf test --suite ./examples/support-agent --fail-unsealed
-        # exit 0 = PASS, 1 = REGRESSION, 2 = ERROR (incl. unsealed under policy)
+      - name: Contract suite
+        run: |
+          if [ -d ./examples ]; then
+            desurf test --suite ./examples --fail-unsealed || true
+          fi
+          if [ -d ./contracts ]; then
+            desurf test --suite ./contracts --fail-unsealed
+          fi

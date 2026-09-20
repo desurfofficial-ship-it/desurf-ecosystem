@@ -5,27 +5,47 @@
  */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { runSuite, makeFingerprint, VERSION, containPath, } from "desurf-core";
+import { runSuite, makeFingerprint, checkDrift, VERSION, containPath, } from "desurf-core";
+/** CLI package version — keep in sync with packages/cli/package.json */
+const CLI_VERSION = "2.4.2";
 const HELP = `
-Desurf Ecosystem  ${VERSION}
+Desurf CLI ${CLI_VERSION}  (engine ${VERSION})
 Offline-first behavioral contracts for prompts & agents.
 
+Quick start:
+  desurf init ./contracts
+  desurf test --suite ./contracts
+  # edit a prompt → test again → sealed drift = exit 2
+
 Usage:
-  desurf test    --suite <dir> [--case <id>] [--parallel]
+  desurf test    --suite <dir> [flags]
   desurf init    <dir> [--force]
   desurf seal    --suite <dir> [--force]
   desurf record  --suite <dir> --provider openrouter [--model <id>]
   desurf diff    --suite <dir> --case <id>
+  desurf doctor  --suite <dir>
+  desurf mutate  --suite <dir> [--apply]
+  desurf badge   --suite <dir>
   desurf plugins
   desurf dashboard
-  desurf doctor  --suite <dir>
-  desurf mutate  --suite <dir>   # invent adversarial cases
-  desurf badge   --suite <dir>   # markdown CI badge snippet
   desurf version
 
-Flags (test): --json  --fail-unsealed  --no-parallel  --case <id>
+Test flags:
+  --json            machine-readable SuiteResult
+  --fail-unsealed   UNSEALED pass → ERROR (team policy)
+  --changed         only cases whose prompt/input changed vs seal
+  --case <id>       single case
+  --no-parallel     disable parallel execution
 
-Exit codes: 0=PASS  1=REGRESSION/FLAKY  2=ERROR (incl. stale sealed provenance)
+Assertions (in suite.json):
+  required / forbidden   substring must/must-not appear
+  regex                  pattern match (ReDoS-safe)
+  json_schema            lightweight object/required keys
+  choice                 must pick expected label (Jev-style)
+  confidence             min score on options (heuristic; not a real judge)
+  tool_call / trajectory agent tool sequence contracts
+
+Exit codes: 0=PASS  1=REGRESSION/FLAKY  2=ERROR (stale seal, policy, config)
 `;
 async function loadSuite(dir) {
     const path = join(dir, "suite.json");
@@ -64,7 +84,34 @@ async function cmdTest(args) {
     const parallel = !args.includes("--no-parallel");
     const asJson = args.includes("--json");
     const failUnsealed = args.includes("--fail-unsealed");
+    const onlyChanged = args.includes("--changed");
     const suite = await loadSuite(suiteDir);
+    if (onlyChanged) {
+        const filtered = [];
+        for (const tc of suite.cases) {
+            try {
+                const prompt = await readFile(containPath(suiteDir, tc.prompt, "prompt"), "utf8");
+                const input = await readFile(containPath(suiteDir, tc.input, "input"), "utf8");
+                const side = containPath(suiteDir, tc.output, "output") + ".desurf";
+                let fp = null;
+                try {
+                    fp = JSON.parse(await readFile(side, "utf8"));
+                }
+                catch { }
+                const drift = checkDrift(fp, prompt, input);
+                if (!fp || drift.drifted)
+                    filtered.push(tc);
+            }
+            catch {
+                filtered.push(tc);
+            }
+        }
+        suite.cases = filtered;
+        if (suite.cases.length === 0) {
+            console.log("Desurf: --changed matched 0 cases (all sealed fingerprints current)");
+            process.exit(0);
+        }
+    }
     const result = await runSuite(suiteDir, suite, { parallel, caseFilter });
     if (failUnsealed) {
         for (const r of result.results) {
@@ -81,7 +128,7 @@ async function cmdTest(args) {
         console.log(JSON.stringify(result, null, 2));
         process.exit(result.exitCode);
     }
-    console.log(`\nDesurf Ecosystem  v${VERSION}`);
+    console.log(`\nDesurf  cli ${CLI_VERSION}  engine ${VERSION}`);
     console.log(`Suite: ${result.name}  (${result.results.length} cases, ${result.totalMs.toFixed(0)}ms)\n`);
     for (const r of result.results) {
         const icon = r.reliability === "PASS" ? "✓" :
@@ -431,8 +478,20 @@ async function cmdMutate(args) {
     const mutPath = join(suiteDir, "suite.mutants.json");
     await writeFile(mutPath, JSON.stringify(mutated, null, 2));
     console.log(`Invented ${mutants.length} adversarial cases → ${mutPath}`);
-    console.log(`Run: desurf test --suite ${suiteDir}  (or point suite.json at suite.mutants.json)`);
-    console.log(`Tip: copy suite.mutants.json over suite.json to gate against these failures.`);
+    if (args.includes("--apply")) {
+        const backup = join(suiteDir, "suite.json.bak");
+        try {
+            await writeFile(backup, await readFile(join(suiteDir, "suite.json"), "utf8"));
+        }
+        catch { }
+        await writeFile(join(suiteDir, "suite.json"), JSON.stringify(mutated, null, 2));
+        console.log(`Applied mutants to suite.json (backup: suite.json.bak)`);
+        console.log(`Run: desurf test --suite ${suiteDir}`);
+    }
+    else {
+        console.log(`Run: desurf mutate --suite ${suiteDir} --apply   # replace suite.json with mutants`);
+        console.log(`Or:  desurf test --suite ${suiteDir}  after copying suite.mutants.json → suite.json`);
+    }
 }
 async function cmdBadge(args) {
     const suiteIdx = args.indexOf("--suite");
@@ -480,7 +539,7 @@ async function main() {
         return;
     }
     if (cmd === "version" || cmd === "--version") {
-        console.log(VERSION);
+        console.log(`desurf-cli ${CLI_VERSION} (engine ${VERSION})`);
         return;
     }
     if (cmd === "test")

@@ -1,72 +1,59 @@
-# Desurf Ecosystem
+# Desurf
 
 **Prompts and agents are code. Desurf is the regression suite that runs offline in CI.**
 
-[![npm desurf-cli](https://img.shields.io/npm/v/desurf-cli.svg)](https://www.npmjs.com/package/desurf-cli)
-[![npm desurf-core](https://img.shields.io/npm/v/desurf-core.svg)](https://www.npmjs.com/package/desurf-core)
+[![npm](https://img.shields.io/npm/v/desurf-cli.svg)](https://www.npmjs.com/package/desurf-cli)
 
-Offline-first behavioral contracts for LLM prompts and agents. Sealed provenance. Honest exit codes. No API key on the merge gate.
+## 60-second start
+
+```bash
+npm install -g desurf-cli
+desurf init ./contracts
+desurf test --suite ./contracts          # exit 0 in a few ms
+# edit contracts/prompts/*.txt
+desurf test --suite ./contracts          # sealed drift → exit 2
+```
+
+No API key on the merge gate. Sealed cassettes + assertions = behavioral contracts.
 
 ## Install
 
 ```bash
-npm install -g desurf-cli
-# or
-npx desurf-cli
+npm install desurf-cli
+# pulls desurf-core automatically
+npx desurf version
+# → desurf-cli 2.4.0 (engine 2.3.0)
 ```
-
-Packages: `desurf-cli` · `desurf-core` · `desurf-reflex`
-
-## 60-second CI gate
-
-```bash
-desurf init ./contracts
-desurf test --suite ./contracts
-# 0 = PASS · 1 = REGRESSION · 2 = ERROR (stale sealed / policy)
-```
-
-GitHub Actions: copy [`.github/workflows/desurf-contracts.yml`](.github/workflows/desurf-contracts.yml).
-
-## Why teams use it
-
-| Problem | Desurf |
-|---------|--------|
-| Model silent-updates | Sealed fingerprint → ERROR on drift |
-| Prompt tweaks ship untested | Cassette + assertions on every PR |
-| Agent tool regressions | `tool_call` / `trajectory` assertions |
-| Eval platforms need keys + $ | Offline path is pure and free |
 
 ## Commands
 
-```
-desurf test    --suite <dir> [--json] [--fail-unsealed] [--case <id>]
-desurf init    <dir>
-desurf seal    --suite <dir> [--force]
-desurf record  --suite <dir> --provider openrouter
-desurf doctor  --suite <dir>     # health + security
-desurf mutate  --suite <dir>     # invent adversarial cases
-desurf badge   --suite <dir>     # README badge markdown
-desurf plugins
-desurf version
-```
+| Command | Purpose |
+|---------|---------|
+| `test --suite <dir>` | Run contracts (`--json` `--fail-unsealed` `--changed` `--case`) |
+| `init <dir>` | Example sealed suite |
+| `seal` / `record` | Refresh provenance / capture live |
+| `doctor` | Health + security audit |
+| `mutate [--apply]` | Invent adversarial cases (optionally replace suite.json) |
+| `badge` | README shields.io snippet |
 
-## Reflex (zero-config interceptor)
+**Exit codes:** `0` PASS · `1` REGRESSION · `2` ERROR (stale seal, policy, bad config)
 
-```bash
-npm install desurf-reflex
-```
+## CI
 
-```js
-import { installReflex } from 'desurf-reflex'
-installReflex({ mode: 'auto' }) // DESURF_REFLEX=record|replay|auto
+See [`.github/workflows/desurf-contracts.yml`](.github/workflows/desurf-contracts.yml).
+
+```yaml
+- run: npm install -g desurf-cli
+- run: desurf test --suite ./contracts --fail-unsealed
 ```
 
-## Commercial
+## Packages
 
-- **OSS**: full offline engine, CLI, Reflex, doctor, mutate — free forever for individuals.
-- **Team / Business** (roadmap): shared suite registry, signed run attestations, scheduled live drift canaries, policy packs.
-
-Trust is the product. Contact: desurf.official@gmail.com
+| Package | Role |
+|---------|------|
+| [desurf-cli](https://www.npmjs.com/package/desurf-cli) | CLI binary `desurf` |
+| [desurf-core](https://www.npmjs.com/package/desurf-core) | Engine |
+| [desurf-reflex](https://www.npmjs.com/package/desurf-reflex) | Zero-config fetch interceptor |
 
 ## License
 

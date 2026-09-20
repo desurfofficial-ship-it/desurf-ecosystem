@@ -4,6 +4,6 @@ export * from "./assertions.js";
 export * from "./runner.js";
 export * from "./paths.js";
 
-export const VERSION = "2.2.3";
+export const VERSION = "2.3.1";
 export const ECOSYSTEM = "desurf-ecosystem";
 

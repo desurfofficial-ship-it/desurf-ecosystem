@@ -1,28 +1,23 @@
 {
   "name": "desurf-core",
-  "version": "2.2.3",
+  "version": "2.3.1",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js"
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
   },
+  "files": [
+    "dist"
+  ],
   "scripts": {
-    "build": "tsc",
-    "test": "node --experimental-vm-modules node_modules/vitest/vitest.mjs run 2>/dev/null || echo 'vitest optional'"
+    "build": "tsc"
   },
   "devDependencies": {
     "@types/node": "^22.20.4",
     "typescript": "^5.7.2"
-  },
-  "publishConfig": {
-    "access": "public"
-  },
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/desurfofficial-ship-it/desurf-ecosystem.git"
-  },
-  "files": [
-    "dist"
-  ]
+  }
 }
