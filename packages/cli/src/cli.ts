@@ -25,9 +25,12 @@ Usage:
   desurf diff    --suite <dir> --case <id>
   desurf plugins
   desurf dashboard
-  desurf doctor  --suite <dir>   # health + security checks
-  desurf mutate  --suite <dir>   # invent adversarial sibling cases
+  desurf doctor  --suite <dir>
+  desurf mutate  --suite <dir>   # invent adversarial cases
+  desurf badge   --suite <dir>   # markdown CI badge snippet
   desurf version
+
+Flags (test): --json  --fail-unsealed  --no-parallel  --case <id>
 
 Exit codes: 0=PASS  1=REGRESSION/FLAKY  2=ERROR (incl. stale sealed provenance)
 `;
@@ -65,9 +68,28 @@ async function cmdTest(args: string[]) {
   const caseIdx = args.indexOf("--case");
   const caseFilter = caseIdx >= 0 ? args[caseIdx + 1] : undefined;
   const parallel = !args.includes("--no-parallel");
+  const asJson = args.includes("--json");
+  const failUnsealed = args.includes("--fail-unsealed");
 
   const suite = await loadSuite(suiteDir);
   const result = await runSuite(suiteDir, suite, { parallel, caseFilter });
+
+  if (failUnsealed) {
+    for (const r of result.results) {
+      if (r.cassetteState === "UNSEALED" && r.reliability === "PASS") {
+        r.reliability = "ERROR";
+        r.error = "policy: --fail-unsealed (cassette not sealed)";
+        result.error += 1;
+        result.passed = Math.max(0, result.passed - 1);
+        result.exitCode = 2;
+      }
+    }
+  }
+
+  if (asJson) {
+    console.log(JSON.stringify(result, null, 2));
+    process.exit(result.exitCode);
+  }
 
   console.log(`\nDesurf Ecosystem  v${VERSION}`);
   console.log(`Suite: ${result.name}  (${result.results.length} cases, ${result.totalMs.toFixed(0)}ms)\n`);
@@ -217,7 +239,7 @@ async function cmdRecord(args: string[]) {
   }
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) {
-    console.error("Set OPENROUTER_API_KEY");
+    console.error("Desurf: Set OPENROUTER_API_KEY to record live responses");
     process.exit(2);
   }
 
@@ -387,12 +409,31 @@ async function cmdMutate(args: string[]) {
       const id = `${tc.id}__mut_${v.suffix}`.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 128);
       const outRel = `outputs/mutants/${id}.txt`;
       await writeFile(join(suiteDir, outRel), v.body);
+      // Force assertions that should FAIL on mutants (prove the gate works)
+      const conf = (tc.assertions || []).find((a) => a.type === "confidence" || a.type === "choice");
+      const opts = conf?.options || ["billing", "technical", "account", "other"];
+      const expectedChoice = typeof conf?.value === "string" ? conf.value : opts[0];
+      const hardened: any[] = [
+        ...(tc.assertions || []),
+        { type: "forbidden", value: "I am an AI" },
+        { type: "required", value: "category" },
+        { type: "choice", value: expectedChoice, options: opts, threshold: 0.6 },
+        { type: "forbidden", value: "Hope that helps" },
+      ];
+      // dedupe by type+value
+      const seen = new Set<string>();
+      const assertions = hardened.filter((a) => {
+        const k = a.type + ":" + String((a as any).value ?? "");
+        if (seen.has(k)) return false;
+        seen.add(k);
+        return true;
+      });
       mutants.push({
         id,
         input: tc.input,
         prompt: tc.prompt,
         output: outRel,
-        assertions: tc.assertions,
+        assertions,
       });
     }
   }
@@ -408,6 +449,44 @@ async function cmdMutate(args: string[]) {
   console.log(`Tip: copy suite.mutants.json over suite.json to gate against these failures.`);
 }
 
+
+
+async function cmdBadge(args: string[]) {
+  const suiteIdx = args.indexOf("--suite");
+  if (suiteIdx === -1 || !args[suiteIdx + 1]) {
+    console.error("Required: --suite <dir>");
+    process.exit(2);
+  }
+  const suiteDir = resolve(args[suiteIdx + 1]);
+  let status = "unknown";
+  let color = "lightgrey";
+  let exit = 0;
+  try {
+    const suite = await loadSuite(suiteDir);
+    const result = await runSuite(suiteDir, suite, { parallel: true });
+    exit = result.exitCode;
+    if (result.exitCode === 0) {
+      status = "passing";
+      color = "brightgreen";
+    } else if (result.exitCode === 1) {
+      status = "regression";
+      color = "orange";
+    } else {
+      status = "error";
+      color = "red";
+    }
+  } catch (e: any) {
+    status = "error";
+    color = "red";
+    exit = 2;
+  }
+  const label = "desurf";
+  const url = `https://img.shields.io/badge/${label}-${status}-${color}`;
+  console.log(`![desurf](${url})`);
+  console.log(`<!-- desurf-badge status=${status} exit=${exit} -->`);
+  console.log(`\nMarkdown ready. Drop into README. Contracts: ${status}.`);
+  process.exit(exit);
+}
 
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2);
@@ -428,6 +507,7 @@ async function main() {
   if (cmd === "dashboard") return cmdDashboard();
   if (cmd === "doctor") return cmdDoctor(rest);
   if (cmd === "mutate") return cmdMutate(rest);
+  if (cmd === "badge") return cmdBadge(rest);
   console.error(`Unknown command: ${cmd}`);
   console.log(HELP);
   process.exit(2);

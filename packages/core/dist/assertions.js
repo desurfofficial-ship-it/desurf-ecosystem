@@ -13,8 +13,10 @@ function localConfidence(text, options) {
             }
         }
     }
-    if (text.trim().startsWith("{") || text.trim().startsWith("[")) {
-        score = Math.min(0.95, score + 0.2);
+    // Only boost when the chosen option is actually present (avoid free 0.95 on any JSON)
+    if (score >= 0.6 &&
+        (text.trim().startsWith("{") || text.trim().startsWith("["))) {
+        score = Math.min(0.95, score + 0.15);
     }
     return { choice: best, confidence: Math.round(score * 100) / 100 };
 }

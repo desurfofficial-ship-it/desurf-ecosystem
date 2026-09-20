@@ -1,0 +1,19 @@
+# Desurf offline contract gate — no API keys required
+name: desurf-contracts
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+jobs:
+  contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install Desurf
+        run: npm install -g desurf-cli@2
+      - name: Run contract suite
+        run: desurf test --suite ./examples/support-agent --fail-unsealed
+        # exit 0 = PASS, 1 = REGRESSION, 2 = ERROR (incl. unsealed under policy)
