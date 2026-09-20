@@ -1,0 +1,7 @@
+{
+  "name": "@desurf/sdk",
+  "version": "2.0.0",
+  "type": "module",
+  "main": "./src/index.ts",
+  "dependencies": { "@desurf/core": "file:../core" }
+}

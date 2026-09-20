@@ -1,0 +1,7 @@
+<!DOCTYPE html><html><head><meta charset="utf-8"><title>Desurf Dashboard</title>
+<style>body{font-family:system-ui;background:#0b0f14;color:#e6edf7;padding:2rem}h1{margin:0}.ok{color:#3dd68c}</style></head>
+<body><h1>Desurf Ecosystem</h1><p class="ok">Local dashboard — drop results.json from <code>desurf test --json</code></p>
+<pre id="o">Load sample or results.json</pre>
+<script>
+fetch('results.json').then(r=>r.ok?r.json():null).then(d=>{if(d)document.getElementById('o').textContent=JSON.stringify(d,null,2)});
+</script></body></html>
