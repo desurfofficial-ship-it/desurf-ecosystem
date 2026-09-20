@@ -1,0 +1,1 @@
+{"name":"support-agent","version":"2.0.0","cases":[{"id":"billing","input":"inputs/t.txt","prompt":"prompts/p.txt","output":"outputs/o.json","assertions":[{"type":"required","value":"category"},{"type":"json_schema","value":{"type":"object","required":["category"]}},{"type":"confidence","options":["billing","technical"],"threshold":0.5}]}]}

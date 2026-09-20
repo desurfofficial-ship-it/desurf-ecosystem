@@ -1,0 +1,12 @@
+{
+  "name": "@desurf/reflex",
+  "version": "2.0.0",
+  "type": "module",
+  "description": "Zero-config LLM cassette interceptor — wrap any fetch/OpenAI call, auto record & replay",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": { ".": "./dist/index.js" },
+  "scripts": { "build": "tsc" },
+  "dependencies": { "@desurf/core": "file:../core" },
+  "devDependencies": { "typescript": "^5.7.2", "@types/node": "^22.10.0" }
+}

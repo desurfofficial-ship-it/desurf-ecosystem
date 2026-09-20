@@ -1,0 +1,9 @@
+node_modules/
+*.log
+.desurf-reflex/
+.env
+.env.*
+package-lock.json
+**/package-lock.json
+results.json
+.DS_Store

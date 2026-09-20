@@ -1,0 +1,7 @@
+{
+  "name": "desurf-ecosystem",
+  "version": "2.0.0",
+  "private": true,
+  "description": "Desurf Ecosystem — offline-first behavioral contracts for prompts & agents",
+  "license": "MIT"
+}

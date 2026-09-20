@@ -1,0 +1,21 @@
+{
+  "version": "2.0",
+  "id": "billing-v1",
+  "name": "Support billing classifier",
+  "prompt": "Classify as JSON",
+  "input": "Charged twice",
+  "output": "{\"category\":\"billing\"}",
+  "assertions": [
+    {
+      "type": "required",
+      "value": "category"
+    },
+    {
+      "type": "confidence",
+      "options": [
+        "billing"
+      ],
+      "threshold": 0.5
+    }
+  ]
+}
