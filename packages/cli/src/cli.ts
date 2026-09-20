@@ -5,7 +5,7 @@
  */
 import { readFile, writeFile, mkdir, readdir, access } from "node:fs/promises";
 import { execSync } from "node:child_process";
-import { join, resolve, relative } from "node:path";
+import { join, resolve, relative, dirname } from "node:path";
 import {
   runSuite,
   makeFingerprint,
@@ -17,7 +17,7 @@ import {
 } from "desurf-core";
 
 /** CLI package version — keep in sync with packages/cli/package.json */
-const CLI_VERSION = "2.5.1";
+const CLI_VERSION = "2.5.2";
 
 type DesurfConfig = {
   suites?: string[];
@@ -363,9 +363,12 @@ async function cmdTest(args: string[]) {
     }
 
     if (junitPath) {
-      const out = suiteDirs.length > 1
-        ? junitPath.replace(/\.xml$/, `-${result.name.replace(/[^a-zA-Z0-9_-]/g, "_")}.xml`)
-        : junitPath;
+      let out = junitPath;
+      if (suiteDirs.length > 1) {
+        const slug = relative(cwd, suiteDir).replace(/[\\/]/g, "__").replace(/[^a-zA-Z0-9._-]/g, "_") || result.name;
+        out = junitPath.replace(/\.xml$/i, `-${slug}.xml`);
+      }
+      await mkdir(dirname(out), { recursive: true }).catch(() => {});
       await writeFile(out, junitXml(result));
       console.log(`Wrote JUnit: ${out}`);
     }
