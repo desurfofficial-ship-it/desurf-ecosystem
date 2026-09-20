@@ -17,7 +17,7 @@ import {
 } from "desurf-core";
 
 /** CLI package version — keep in sync with packages/cli/package.json */
-const CLI_VERSION = "2.6.4";
+const CLI_VERSION = "2.6.5";
 
 type DesurfConfig = {
   suites?: string[];
