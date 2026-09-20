@@ -3,7 +3,7 @@
 ## Goal
 Use Desurf as the **offline behavioral regression gate** across a monorepo / multi-team product — same role as unit tests on the critical path.
 
-## Shipped for scale (v2.5.1)
+## Shipped for scale (v2.6)
 
 | Capability | How |
 |------------|-----|
@@ -16,6 +16,9 @@ Use Desurf as the **offline behavioral regression gate** across a monorepo / mul
 | Glob suites | `packages/*/contracts`, `apps/**/contracts` in config |
 | Affected only | `desurf test --affected [--base origin/main]` |
 | Windows paths | backslashes normalized to portable form |
+| Output seal | `outputHash` — tamper sealed output → ERROR |
+| `--strict` | reject empty / confidence-only assertion sets |
+| `desurf-sdk` | embed `runSuite` in Nx/custom runners |
 | Path safety | containment, symlink check, size caps |
 
 ## Minimum setup (monorepo)

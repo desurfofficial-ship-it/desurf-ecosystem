@@ -9,9 +9,9 @@ export function makeFingerprint(
   prompt: string,
   input: string,
   state: CassetteState,
-  meta: { model?: string; provider?: string } = {}
+  meta: { model?: string; provider?: string; output?: string } = {}
 ): Fingerprint {
-  return {
+  const fp: Fingerprint = {
     promptHash: sha256(prompt),
     inputHash: sha256(input),
     model: meta.model,
@@ -19,17 +19,31 @@ export function makeFingerprint(
     createdAt: new Date().toISOString(),
     state,
   };
+  if (meta.output != null) {
+    fp.outputHash = sha256(meta.output);
+  }
+  return fp;
 }
 
 export function checkDrift(
-  fp: Fingerprint | undefined,
+  fp: Fingerprint | undefined | null,
   currentPrompt: string,
-  currentInput: string
+  currentInput: string,
+  currentOutput?: string
 ): { drifted: boolean; reason?: string } {
   if (!fp) return { drifted: false };
-  const p = sha256(currentPrompt);
-  const i = sha256(currentInput);
-  if (p !== fp.promptHash) return { drifted: true, reason: "prompt changed" };
-  if (i !== fp.inputHash) return { drifted: true, reason: "input changed" };
+  if (fp.promptHash && fp.promptHash !== sha256(currentPrompt)) {
+    return { drifted: true, reason: "prompt changed" };
+  }
+  if (fp.inputHash && fp.inputHash !== sha256(currentInput)) {
+    return { drifted: true, reason: "input changed" };
+  }
+  if (
+    fp.outputHash &&
+    currentOutput != null &&
+    fp.outputHash !== sha256(currentOutput)
+  ) {
+    return { drifted: true, reason: "output changed (sealed cassette tampered)" };
+  }
   return { drifted: false };
 }

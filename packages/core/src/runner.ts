@@ -127,8 +127,8 @@ export async function runCase(
       };
     }
 
-    const driftCheck = checkDrift(cassette.fingerprint, prompt, input);
-    if (state === "SEALED" && driftCheck.drifted) {
+    const driftCheck = checkDrift(cassette.fingerprint, prompt, input, output);
+    if ((state === "SEALED" || state === "RECORDED") && driftCheck.drifted) {
       return {
         id: tc.id,
         reliability: "ERROR",

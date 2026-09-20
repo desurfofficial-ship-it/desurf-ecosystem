@@ -8,7 +8,7 @@ import { execSync } from "node:child_process";
 import { join, resolve, relative, dirname } from "node:path";
 import { runSuite, makeFingerprint, checkDrift, VERSION, containPath, } from "desurf-core";
 /** CLI package version — keep in sync with packages/cli/package.json */
-const CLI_VERSION = "2.5.4";
+const CLI_VERSION = "2.6.0";
 // Expand simple globs: packages/*/contracts or apps/**/contracts
 async function expandSuitePatterns(patterns, cwd) {
     const out = [];
@@ -231,6 +231,7 @@ Test flags:
   --junit <file>    write JUnit XML (CI/enterprise)
   --summary         markdown summary (GitHub Step Summary aware)
   --fail-unsealed   UNSEALED pass → ERROR (team policy)
+  --strict          reject empty or confidence-only assertion sets
   --changed         only cases whose prompt/input changed vs seal
   --case <id>       single case
   --no-parallel     disable parallel execution
@@ -312,6 +313,7 @@ async function cmdTest(args) {
     const parallel = args.includes("--no-parallel") ? false : cfg.parallel !== false;
     const asJson = args.includes("--json");
     const failUnsealed = args.includes("--fail-unsealed") || !!cfg.failUnsealed;
+    const strict = args.includes("--strict") || !!cfg.strict;
     const onlyChanged = args.includes("--changed");
     const wantSummary = args.includes("--summary") || !!cfg.summary || !!process.env.GITHUB_STEP_SUMMARY;
     const junitIdx = args.indexOf("--junit");
@@ -352,6 +354,27 @@ async function cmdTest(args) {
                 if (r.cassetteState === "UNSEALED" && r.reliability === "PASS") {
                     r.reliability = "ERROR";
                     r.error = "policy: --fail-unsealed (cassette not sealed)";
+                    result.error += 1;
+                    result.passed = Math.max(0, result.passed - 1);
+                    result.exitCode = 2;
+                }
+            }
+        }
+        if (strict) {
+            for (const r of result.results) {
+                if (r.reliability !== "PASS")
+                    continue;
+                const types = r.assertions.map((a) => a.assertion.type);
+                if (types.length === 0) {
+                    r.reliability = "ERROR";
+                    r.error = "policy: --strict (case has no assertions)";
+                    result.error += 1;
+                    result.passed = Math.max(0, result.passed - 1);
+                    result.exitCode = 2;
+                }
+                else if (types.every((x) => x === "confidence")) {
+                    r.reliability = "ERROR";
+                    r.error = "policy: --strict (confidence-only assertions are not merge-safe)";
                     result.error += 1;
                     result.passed = Math.max(0, result.passed - 1);
                     result.exitCode = 2;
@@ -414,7 +437,7 @@ async function cmdTest(args) {
 async function cmdInit(args) {
     const force = args.includes("--force");
     const dirArg = args.find((a) => a && !a.startsWith("-"));
-    const dir = resolve(dirArg || "desurf-suite");
+    const dir = resolve(dirArg || "contracts");
     try {
         await readFile(join(dir, "suite.json"), "utf8");
         if (!force) {
@@ -467,7 +490,8 @@ Categories: billing, technical, other.
     // Seal it immediately for offline determinism
     const prompt = await readFile(join(dir, "prompts/classify.txt"), "utf8");
     const input = await readFile(join(dir, "inputs/ticket.txt"), "utf8");
-    const fp = makeFingerprint(prompt, input, "SEALED");
+    const outBody = await readFile(join(dir, "outputs/good.json"), "utf8");
+    const fp = makeFingerprint(prompt, input, "SEALED", { output: outBody });
     await writeFile(join(dir, "outputs/good.json.desurf"), JSON.stringify(fp, null, 2));
     console.log(`Initialized Desurf suite at ${dir}`);
     console.log(`Run: desurf test --suite ${dir}`);
@@ -492,8 +516,13 @@ async function cmdSeal(args) {
             }
             catch { }
         }
-        const fp = makeFingerprint(prompt, input, "SEALED");
-        await mkdir(join(outPath, ".."), { recursive: true });
+        let output = "";
+        try {
+            output = await readFile(outPath, "utf8");
+        }
+        catch { }
+        const fp = makeFingerprint(prompt, input, "SEALED", { output });
+        await mkdir(dirname(outPath), { recursive: true });
         await writeFile(side, JSON.stringify(fp, null, 2));
         console.log(`sealed ${tc.id}`);
     }
@@ -547,7 +576,7 @@ async function cmdRecord(args) {
         const data = (await res.json());
         const text = data.choices?.[0]?.message?.content ?? "";
         const outPath = containPath(suiteDir, tc.output, "output");
-        const fp = makeFingerprint(prompt, input, "RECORDED", { model, provider });
+        const fp = makeFingerprint(prompt, input, "RECORDED", { model, provider, output: text });
         await writeFile(outPath, text);
         await writeFile(outPath + ".desurf", JSON.stringify(fp, null, 2));
         console.log(`recorded ${tc.id} (${text.length} chars)`);

@@ -107,8 +107,8 @@ export async function runCase(suiteDir, tc, opts = {}) {
                 error: "no output available (offline requires cassette)",
             };
         }
-        const driftCheck = checkDrift(cassette.fingerprint, prompt, input);
-        if (state === "SEALED" && driftCheck.drifted) {
+        const driftCheck = checkDrift(cassette.fingerprint, prompt, input, output);
+        if ((state === "SEALED" || state === "RECORDED") && driftCheck.drifted) {
             return {
                 id: tc.id,
                 reliability: "ERROR",

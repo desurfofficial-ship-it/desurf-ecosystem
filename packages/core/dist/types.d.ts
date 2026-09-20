@@ -34,6 +34,8 @@ export interface Suite {
 export interface Fingerprint {
     promptHash: string;
     inputHash: string;
+    /** Present when sealed/recorded with output — output tamper → ERROR */
+    outputHash?: string;
     model?: string;
     provider?: string;
     createdAt: string;
