@@ -11,7 +11,7 @@ import {
   VERSION,
   type Suite,
   type TestCase,
-} from "@desurf/core";
+} from "desurf-core";
 
 const HELP = `
 Desurf Ecosystem  ${VERSION}
@@ -31,8 +31,26 @@ Exit codes: 0=PASS  1=REGRESSION/FLAKY  2=ERROR (incl. stale sealed provenance)
 `;
 
 async function loadSuite(dir: string): Promise<Suite> {
-  const raw = await readFile(join(dir, "suite.json"), "utf8");
-  return JSON.parse(raw) as Suite;
+  const path = join(dir, "suite.json");
+  let raw: string;
+  try {
+    raw = await readFile(path, "utf8");
+  } catch (e: any) {
+    if (e?.code === "ENOENT") {
+      throw new Error(`Desurf: suite not found. Expected suite.json at ${path}. Run: desurf init <dir>`);
+    }
+    throw new Error(`Desurf: cannot read suite.json (${e?.code || e?.message || e})`);
+  }
+  try {
+    const suite = JSON.parse(raw) as Suite;
+    if (!suite || !Array.isArray(suite.cases)) {
+      throw new Error("suite.json must include a cases array");
+    }
+    return suite;
+  } catch (e: any) {
+    if (String(e?.message || e).startsWith("suite.json")) throw e;
+    throw new Error(`Desurf: suite.json is not valid JSON (${e?.message || e})`);
+  }
 }
 
 async function cmdTest(args: string[]) {
@@ -311,6 +329,11 @@ async function main() {
 }
 
 main().catch((e) => {
-  console.error(e);
+  const msg = e?.message || String(e);
+  if (String(msg).startsWith("Desurf:")) {
+    console.error(msg);
+  } else {
+    console.error(`Desurf: ${msg}`);
+  }
   process.exit(2);
 });

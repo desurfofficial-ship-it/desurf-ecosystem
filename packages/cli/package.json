@@ -1,6 +1,6 @@
 {
-  "name": "@desurf/cli",
-  "version": "2.0.0",
+  "name": "desurf-cli",
+  "version": "2.1.1",
   "type": "module",
   "bin": {
     "desurf": "./dist/cli.js"
@@ -10,10 +10,9 @@
     "build": "tsc"
   },
   "dependencies": {
-    "@desurf/core": "file:../core"
+    "desurf-core": "^2.0.1"
   },
-  "devDependencies": {
-    "@types/node": "^22.10.0",
-    "typescript": "^5.7.2"
-  }
+  "files": [
+    "dist"
+  ]
 }

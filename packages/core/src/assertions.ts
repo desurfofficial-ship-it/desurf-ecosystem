@@ -1,8 +1,6 @@
 import type { Assertion, AssertionResult } from "./types.js";
 
-/** Deterministic local "confidence" heuristic (Jev-inspired).
- *  Real Jev would be plugged via provider later; this keeps offline pure & fast.
- */
+/** Deterministic local "confidence" heuristic (Jev-inspired). */
 function localConfidence(text: string, options: string[]): { choice: string; confidence: number } {
   const lower = text.toLowerCase();
   let best = options[0] || "unknown";
@@ -17,9 +15,39 @@ function localConfidence(text: string, options: string[]): { choice: string; con
       }
     }
   }
-  // Strong signal if JSON-like structured output
-  if (text.trim().startsWith("{") || text.trim().startsWith("[")) score = Math.min(0.95, score + 0.2);
+  if (text.trim().startsWith("{") || text.trim().startsWith("[")) {
+    score = Math.min(0.95, score + 0.2);
+  }
   return { choice: best, confidence: Math.round(score * 100) / 100 };
+}
+
+/** Reject patterns that are likely catastrophic backtracking (ReDoS). */
+function isDangerousRegex(pattern: string): string | null {
+  if (pattern.length > 200) return "pattern too long (max 200)";
+  if (/\([^)]*[+*][^)]*\)[+*{]/.test(pattern)) {
+    return "nested quantifiers rejected (ReDoS risk)";
+  }
+  if (/(\.\*){2,}|(\.\+){2,}/.test(pattern)) {
+    return "stacked wildcards rejected (ReDoS risk)";
+  }
+  return null;
+}
+
+function safeRegexTest(pattern: string, flags: string, text: string): { ok: boolean; error?: string } {
+  const danger = isDangerousRegex(pattern);
+  if (danger) return { ok: false, error: danger };
+  let re: RegExp;
+  try {
+    re = new RegExp(pattern, flags);
+  } catch (e: any) {
+    return { ok: false, error: `invalid regex: ${e?.message || e}` };
+  }
+  const sample = text.length > 50_000 ? text.slice(0, 50_000) : text;
+  try {
+    return { ok: re.test(sample) };
+  } catch (e: any) {
+    return { ok: false, error: `regex execution failed: ${e?.message || e}` };
+  }
 }
 
 export function evaluateAssertion(
@@ -32,9 +60,13 @@ export function evaluateAssertion(
     switch (a.type) {
       case "required": {
         const val = String(a.value ?? "");
-        const found = a.caseSensitive === false
-          ? output.toLowerCase().includes(val.toLowerCase())
-          : output.includes(val);
+        if (!val) {
+          return { assertion: a, passed: false, message: "required assertion needs non-empty value" };
+        }
+        const found =
+          a.caseSensitive === false
+            ? output.toLowerCase().includes(val.toLowerCase())
+            : output.includes(val);
         return {
           assertion: a,
           passed: found,
@@ -43,9 +75,11 @@ export function evaluateAssertion(
       }
       case "forbidden": {
         const val = String(a.value ?? "");
-        const found = a.caseSensitive === false
-          ? output.toLowerCase().includes(val.toLowerCase())
-          : output.includes(val);
+        if (!val) return { assertion: a, passed: true };
+        const found =
+          a.caseSensitive === false
+            ? output.toLowerCase().includes(val.toLowerCase())
+            : output.includes(val);
         return {
           assertion: a,
           passed: !found,
@@ -53,20 +87,46 @@ export function evaluateAssertion(
         };
       }
       case "regex": {
-        const re = new RegExp(a.pattern || String(a.value || ""), a.caseSensitive === false ? "i" : "");
-        const ok = re.test(output);
-        return { assertion: a, passed: ok, message: ok ? undefined : `regex failed: ${re}` };
+        const pattern = a.pattern || String(a.value || "");
+        if (!pattern) {
+          return { assertion: a, passed: false, message: "regex assertion needs pattern" };
+        }
+        const flags = a.caseSensitive === false ? "i" : "";
+        const result = safeRegexTest(pattern, flags, output);
+        if (result.error) {
+          return { assertion: a, passed: false, message: result.error };
+        }
+        return {
+          assertion: a,
+          passed: result.ok,
+          message: result.ok ? undefined : `regex failed: /${pattern}/${flags}`,
+        };
       }
       case "json_schema": {
         let parsed: unknown;
         try {
           parsed = JSON.parse(output);
         } catch {
-          return { assertion: a, passed: false, message: "output is not valid JSON" };
+          const m = output.match(/\{[\s\S]*\}|\[[\s\S]*\]/);
+          if (m) {
+            try {
+              parsed = JSON.parse(m[0]);
+            } catch {
+              return { assertion: a, passed: false, message: "output is not valid JSON" };
+            }
+          } else {
+            return { assertion: a, passed: false, message: "output is not valid JSON" };
+          }
         }
         const schema = (a.value || {}) as Record<string, unknown>;
-        if (schema.type === "object" && typeof parsed === "object" && parsed !== null) {
-          const req = (schema.required as string[]) || Object.keys((schema.properties as object) || {});
+        if (
+          schema.type === "object" &&
+          typeof parsed === "object" &&
+          parsed !== null &&
+          !Array.isArray(parsed)
+        ) {
+          const props = (schema.properties as Record<string, unknown>) || {};
+          const req = (schema.required as string[]) || Object.keys(props);
           for (const k of req) {
             if (!(k in (parsed as object))) {
               return { assertion: a, passed: false, message: `json missing key: ${k}` };
@@ -90,16 +150,20 @@ export function evaluateAssertion(
         const actual = (trajectory || [])
           .filter((t) => t.type === "tool")
           .map((t) => t.name || "");
-        const ok = expected.every((e, i) => actual[i] === e);
+        const ok =
+          expected.length === actual.length && expected.every((e, i) => actual[i] === e);
         return {
           assertion: a,
           passed: ok,
-          message: ok ? undefined : `trajectory mismatch. expected ${JSON.stringify(expected)} got ${JSON.stringify(actual)}`,
+          message: ok
+            ? undefined
+            : `trajectory mismatch. expected ${JSON.stringify(expected)} got ${JSON.stringify(actual)}`,
         };
       }
       case "confidence":
       case "choice": {
-        const opts = a.options || (Array.isArray(a.value) ? (a.value as string[]) : ["pass", "fail"]);
+        const opts =
+          a.options || (Array.isArray(a.value) ? (a.value as string[]) : ["pass", "fail"]);
         const { choice, confidence } = localConfidence(output, opts);
         const threshold = a.threshold ?? 0.7;
         const target = typeof a.value === "string" ? a.value : opts[0];
@@ -113,11 +177,17 @@ export function evaluateAssertion(
           confidence,
           message: passed
             ? undefined
-            : `choice=${choice} confidence=${confidence} (need >= ${threshold}${a.type === "choice" ? ` and == ${target}` : ""})`,
+            : `choice=${choice} confidence=${confidence} (need >= ${threshold}${
+                a.type === "choice" ? ` and == ${target}` : ""
+              })`,
         };
       }
       default:
-        return { assertion: a, passed: false, message: `unknown assertion type: ${(a as any).type}` };
+        return {
+          assertion: a,
+          passed: false,
+          message: `unknown assertion type: ${(a as any).type}`,
+        };
     }
   } catch (e: any) {
     return { assertion: a, passed: false, message: e?.message || String(e) };

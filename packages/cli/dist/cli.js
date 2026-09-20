@@ -5,7 +5,7 @@
  */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { runSuite, makeFingerprint, VERSION, } from "@desurf/core";
+import { runSuite, makeFingerprint, VERSION, } from "desurf-core";
 const HELP = `
 Desurf Ecosystem  ${VERSION}
 Offline-first behavioral contracts for prompts & agents.
@@ -23,8 +23,29 @@ Usage:
 Exit codes: 0=PASS  1=REGRESSION/FLAKY  2=ERROR (incl. stale sealed provenance)
 `;
 async function loadSuite(dir) {
-    const raw = await readFile(join(dir, "suite.json"), "utf8");
-    return JSON.parse(raw);
+    const path = join(dir, "suite.json");
+    let raw;
+    try {
+        raw = await readFile(path, "utf8");
+    }
+    catch (e) {
+        if (e?.code === "ENOENT") {
+            throw new Error(`Desurf: suite not found. Expected suite.json at ${path}. Run: desurf init <dir>`);
+        }
+        throw new Error(`Desurf: cannot read suite.json (${e?.code || e?.message || e})`);
+    }
+    try {
+        const suite = JSON.parse(raw);
+        if (!suite || !Array.isArray(suite.cases)) {
+            throw new Error("suite.json must include a cases array");
+        }
+        return suite;
+    }
+    catch (e) {
+        if (String(e?.message || e).startsWith("suite.json"))
+            throw e;
+        throw new Error(`Desurf: suite.json is not valid JSON (${e?.message || e})`);
+    }
 }
 async function cmdTest(args) {
     const suiteIdx = args.indexOf("--suite");
@@ -277,6 +298,12 @@ async function main() {
     process.exit(2);
 }
 main().catch((e) => {
-    console.error(e);
+    const msg = e?.message || String(e);
+    if (String(msg).startsWith("Desurf:")) {
+        console.error(msg);
+    }
+    else {
+        console.error(`Desurf: ${msg}`);
+    }
     process.exit(2);
 });
