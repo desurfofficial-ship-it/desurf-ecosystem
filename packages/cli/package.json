@@ -1,6 +1,6 @@
 {
   "name": "desurf-cli",
-  "version": "2.6.2",
+  "version": "2.6.3",
   "type": "module",
   "bin": {
     "desurf": "./dist/cli.js"

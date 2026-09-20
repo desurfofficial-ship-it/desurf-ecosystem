@@ -8,7 +8,7 @@ import { execSync } from "node:child_process";
 import { join, resolve, relative, dirname } from "node:path";
 import { runSuite, makeFingerprint, checkDrift, VERSION, containPath, } from "desurf-core";
 /** CLI package version — keep in sync with packages/cli/package.json */
-const CLI_VERSION = "2.6.2";
+const CLI_VERSION = "2.6.3";
 // Expand simple globs: packages/*/contracts or apps/**/contracts
 async function expandSuitePatterns(patterns, cwd) {
     const out = [];
@@ -309,7 +309,15 @@ async function cmdTest(args) {
         process.exit(2);
     }
     const caseIdx = args.indexOf("--case");
-    const caseFilter = caseIdx >= 0 ? args[caseIdx + 1] : undefined;
+    let caseFilter;
+    if (caseIdx >= 0) {
+        const v = args[caseIdx + 1];
+        if (!v || v.startsWith("-")) {
+            console.error("Desurf: --case requires a case id");
+            process.exit(2);
+        }
+        caseFilter = v;
+    }
     const parallel = args.includes("--no-parallel") ? false : cfg.parallel !== false;
     const asJson = args.includes("--json");
     const failUnsealed = args.includes("--fail-unsealed") || !!cfg.failUnsealed;

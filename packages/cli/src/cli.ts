@@ -17,7 +17,7 @@ import {
 } from "desurf-core";
 
 /** CLI package version — keep in sync with packages/cli/package.json */
-const CLI_VERSION = "2.6.2";
+const CLI_VERSION = "2.6.3";
 
 type DesurfConfig = {
   suites?: string[];
@@ -306,7 +306,15 @@ async function cmdTest(args: string[]) {
   }
 
   const caseIdx = args.indexOf("--case");
-  const caseFilter = caseIdx >= 0 ? args[caseIdx + 1] : undefined;
+  let caseFilter: string | undefined;
+  if (caseIdx >= 0) {
+    const v = args[caseIdx + 1];
+    if (!v || v.startsWith("-")) {
+      console.error("Desurf: --case requires a case id");
+      process.exit(2);
+    }
+    caseFilter = v;
+  }
   const parallel = args.includes("--no-parallel") ? false : cfg.parallel !== false;
   const asJson = args.includes("--json");
   const failUnsealed = args.includes("--fail-unsealed") || !!cfg.failUnsealed;
