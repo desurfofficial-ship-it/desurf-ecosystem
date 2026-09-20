@@ -5,7 +5,7 @@
  */
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { runSuite, makeFingerprint, VERSION, } from "desurf-core";
+import { runSuite, makeFingerprint, VERSION, containPath, } from "desurf-core";
 const HELP = `
 Desurf Ecosystem  ${VERSION}
 Offline-first behavioral contracts for prompts & agents.
@@ -171,9 +171,13 @@ async function cmdSeal(args) {
     const force = args.includes("--force");
     const suite = await loadSuite(suiteDir);
     for (const tc of suite.cases) {
-        const prompt = await readFile(join(suiteDir, tc.prompt), "utf8");
-        const input = await readFile(join(suiteDir, tc.input), "utf8");
-        const side = join(suiteDir, tc.output + ".desurf");
+        const promptPath = containPath(suiteDir, tc.prompt, "prompt");
+        const inputPath = containPath(suiteDir, tc.input, "input");
+        const outPath = containPath(suiteDir, tc.output, "output");
+        const prompt = await readFile(promptPath, "utf8");
+        const input = await readFile(inputPath, "utf8");
+        const side = outPath + ".desurf";
+        // sidecar must also stay under suite (outPath already contained)
         if (!force) {
             try {
                 await readFile(side);
@@ -209,8 +213,8 @@ async function cmdRecord(args) {
     }
     const suite = await loadSuite(suiteDir);
     for (const tc of suite.cases) {
-        const prompt = await readFile(join(suiteDir, tc.prompt), "utf8");
-        const input = await readFile(join(suiteDir, tc.input), "utf8");
+        const prompt = await readFile(containPath(suiteDir, tc.prompt, "prompt"), "utf8");
+        const input = await readFile(containPath(suiteDir, tc.input, "input"), "utf8");
         const body = {
             model,
             messages: [
@@ -235,9 +239,10 @@ async function cmdRecord(args) {
         }
         const data = (await res.json());
         const text = data.choices?.[0]?.message?.content ?? "";
-        await writeFile(join(suiteDir, tc.output), text);
+        const outPath = containPath(suiteDir, tc.output, "output");
         const fp = makeFingerprint(prompt, input, "RECORDED", { model, provider });
-        await writeFile(join(suiteDir, tc.output + ".desurf"), JSON.stringify(fp, null, 2));
+        await writeFile(outPath, text);
+        await writeFile(outPath + ".desurf", JSON.stringify(fp, null, 2));
         console.log(`recorded ${tc.id} (${text.length} chars)`);
     }
 }
@@ -281,7 +286,7 @@ async function cmdPlugins() {
     console.log("  web         local dashboard (desurf dashboard)");
     console.log("  confidence  Jev-inspired typed judge (local + future remote)");
     console.log("  trajectory  agent tool-call sequence contracts");
-    console.log("\nRegister custom plugins via @desurf/sdk registerPlugin()");
+    console.log("\nRegister custom plugins via desurf-core / future desurf-sdk registerPlugin()");
 }
 async function cmdDashboard() {
     const port = process.env.DESURF_DASHBOARD_PORT || "3847";

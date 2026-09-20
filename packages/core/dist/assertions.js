@@ -187,5 +187,15 @@ export function evaluateAssertion(output, assertion, trajectory) {
     }
 }
 export function evaluateAll(output, assertions, trajectory) {
-    return assertions.map((a) => evaluateAssertion(output, a, trajectory));
+    const list = Array.isArray(assertions) ? assertions : [];
+    if (list.length > 200) {
+        return [
+            {
+                assertion: { type: "required", value: "" },
+                passed: false,
+                message: `Desurf: too many assertions (${list.length}, max 200)`,
+            },
+        ];
+    }
+    return list.map((a) => evaluateAssertion(output, a, trajectory));
 }

@@ -111,16 +111,19 @@ export async function runCase(suiteDir, tc, opts = {}) {
             };
         }
         const results = evaluateAll(output, tc.assertions, cassette.trajectory);
-        // Unknown assertion types → ERROR not REGRESSION
-        const unknown = results.filter((r) => String(r.message || "").startsWith("unknown assertion type"));
-        if (unknown.length > 0) {
+        // Config mistakes → ERROR not REGRESSION
+        const configErr = results.find((r) => {
+            const m = String(r.message || "");
+            return m.startsWith("unknown assertion type") || m.includes("too many assertions");
+        });
+        if (configErr) {
             return {
                 id: tc.id,
                 reliability: "ERROR",
                 cassetteState: state,
                 assertions: results,
                 durationMs: performance.now() - t0,
-                error: unknown[0].message,
+                error: configErr.message,
                 drift: driftCheck.drifted,
             };
         }
