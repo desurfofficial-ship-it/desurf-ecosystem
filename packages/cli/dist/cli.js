@@ -8,7 +8,7 @@ import { execSync } from "node:child_process";
 import { join, resolve, relative, dirname } from "node:path";
 import { runSuite, makeFingerprint, checkDrift, VERSION, containPath, } from "desurf-core";
 /** CLI package version — keep in sync with packages/cli/package.json */
-const CLI_VERSION = "2.5.2";
+const CLI_VERSION = "2.5.3";
 // Expand simple globs: packages/*/contracts or apps/**/contracts
 async function expandSuitePatterns(patterns, cwd) {
     const out = [];
@@ -124,6 +124,29 @@ function affectedSuiteDirs(suiteDirs, cwd, baseRef) {
         }
         return false;
     });
+}
+/** Resolve suite dir from --suite, config, or common defaults (first-timer friendly). */
+async function resolveSuiteDir(args, opt = true) {
+    const suiteIdx = args.indexOf("--suite");
+    if (suiteIdx >= 0 && args[suiteIdx + 1])
+        return resolve(args[suiteIdx + 1]);
+    const cfg = await loadConfig();
+    if (cfg.suites?.length === 1 && !cfg.suites[0].includes("*")) {
+        return resolve(cfg.suites[0]);
+    }
+    for (const d of ["contracts", "desurf-suite", ".desurf"]) {
+        try {
+            await access(join(resolve(d), "suite.json"));
+            return resolve(d);
+        }
+        catch { }
+    }
+    if (opt) {
+        console.error("Desurf: required --suite <dir> (or ./contracts, ./desurf-suite, desurf.config.json)");
+        console.error("  Try: desurf init ./contracts && desurf test --suite ./contracts");
+        process.exit(2);
+    }
+    return "";
 }
 async function loadConfig(cwd = process.cwd()) {
     for (const name of ["desurf.config.json", ".desurfrc.json"]) {
@@ -448,12 +471,7 @@ Categories: billing, technical, other.
     console.log(`Run: desurf test --suite ${dir}`);
 }
 async function cmdSeal(args) {
-    const suiteIdx = args.indexOf("--suite");
-    if (suiteIdx === -1) {
-        console.error("Required: --suite <dir>");
-        process.exit(2);
-    }
-    const suiteDir = resolve(args[suiteIdx + 1]);
+    const suiteDir = await resolveSuiteDir(args);
     const force = args.includes("--force");
     const suite = await loadSuite(suiteDir);
     for (const tc of suite.cases) {
@@ -534,13 +552,12 @@ async function cmdRecord(args) {
     }
 }
 async function cmdDiff(args) {
-    const suiteIdx = args.indexOf("--suite");
     const caseIdx = args.indexOf("--case");
-    if (suiteIdx === -1 || caseIdx === -1) {
-        console.error("Required: --suite <dir> --case <id>");
+    if (caseIdx === -1 || !args[caseIdx + 1]) {
+        console.error("Desurf: required --case <id>");
         process.exit(2);
     }
-    const suiteDir = resolve(args[suiteIdx + 1]);
+    const suiteDir = await resolveSuiteDir(args);
     const caseId = args[caseIdx + 1];
     const suite = await loadSuite(suiteDir);
     const tc = suite.cases.find((c) => c.id === caseId);
@@ -591,12 +608,7 @@ async function cmdDashboard() {
     console.log(`  Hosted UI is not required — offline contracts are the product.`);
 }
 async function cmdDoctor(args) {
-    const suiteIdx = args.indexOf("--suite");
-    if (suiteIdx === -1 || !args[suiteIdx + 1]) {
-        console.error("Required: --suite <dir>");
-        process.exit(2);
-    }
-    const suiteDir = resolve(args[suiteIdx + 1]);
+    const suiteDir = await resolveSuiteDir(args);
     const issues = [];
     let suite;
     try {
@@ -650,12 +662,7 @@ async function cmdDoctor(args) {
 }
 async function cmdMutate(args) {
     /** Invent adversarial sibling cases: empty, refusal, preamble, wrong-category */
-    const suiteIdx = args.indexOf("--suite");
-    if (suiteIdx === -1 || !args[suiteIdx + 1]) {
-        console.error("Required: --suite <dir>");
-        process.exit(2);
-    }
-    const suiteDir = resolve(args[suiteIdx + 1]);
+    const suiteDir = await resolveSuiteDir(args);
     const suite = await loadSuite(suiteDir);
     const outDir = join(suiteDir, "outputs", "mutants");
     await mkdir(outDir, { recursive: true });
@@ -724,12 +731,7 @@ async function cmdMutate(args) {
     }
 }
 async function cmdBadge(args) {
-    const suiteIdx = args.indexOf("--suite");
-    if (suiteIdx === -1 || !args[suiteIdx + 1]) {
-        console.error("Required: --suite <dir>");
-        process.exit(2);
-    }
-    const suiteDir = resolve(args[suiteIdx + 1]);
+    const suiteDir = await resolveSuiteDir(args);
     let status = "unknown";
     let color = "lightgrey";
     let exit = 0;

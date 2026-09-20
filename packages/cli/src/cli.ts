@@ -17,7 +17,7 @@ import {
 } from "desurf-core";
 
 /** CLI package version — keep in sync with packages/cli/package.json */
-const CLI_VERSION = "2.5.2";
+const CLI_VERSION = "2.5.3";
 
 type DesurfConfig = {
   suites?: string[];
@@ -119,6 +119,29 @@ function affectedSuiteDirs(suiteDirs: string[], cwd: string, baseRef?: string): 
     }
     return false;
   });
+}
+
+
+/** Resolve suite dir from --suite, config, or common defaults (first-timer friendly). */
+async function resolveSuiteDir(args: string[], opt = true): Promise<string> {
+  const suiteIdx = args.indexOf("--suite");
+  if (suiteIdx >= 0 && args[suiteIdx + 1]) return resolve(args[suiteIdx + 1]);
+  const cfg = await loadConfig();
+  if (cfg.suites?.length === 1 && !cfg.suites[0].includes("*")) {
+    return resolve(cfg.suites[0]);
+  }
+  for (const d of ["contracts", "desurf-suite", ".desurf"]) {
+    try {
+      await access(join(resolve(d), "suite.json"));
+      return resolve(d);
+    } catch {}
+  }
+  if (opt) {
+    console.error("Desurf: required --suite <dir> (or ./contracts, ./desurf-suite, desurf.config.json)");
+    console.error("  Try: desurf init ./contracts && desurf test --suite ./contracts");
+    process.exit(2);
+  }
+  return "";
 }
 
 async function loadConfig(cwd = process.cwd()): Promise<DesurfConfig> {
@@ -466,12 +489,7 @@ Categories: billing, technical, other.
 }
 
 async function cmdSeal(args: string[]) {
-  const suiteIdx = args.indexOf("--suite");
-  if (suiteIdx === -1) {
-    console.error("Required: --suite <dir>");
-    process.exit(2);
-  }
-  const suiteDir = resolve(args[suiteIdx + 1]);
+  const suiteDir = await resolveSuiteDir(args);
   const force = args.includes("--force");
   const suite = await loadSuite(suiteDir);
 
@@ -556,13 +574,12 @@ async function cmdRecord(args: string[]) {
 }
 
 async function cmdDiff(args: string[]) {
-  const suiteIdx = args.indexOf("--suite");
   const caseIdx = args.indexOf("--case");
-  if (suiteIdx === -1 || caseIdx === -1) {
-    console.error("Required: --suite <dir> --case <id>");
+  if (caseIdx === -1 || !args[caseIdx + 1]) {
+    console.error("Desurf: required --case <id>");
     process.exit(2);
   }
-  const suiteDir = resolve(args[suiteIdx + 1]);
+  const suiteDir = await resolveSuiteDir(args);
   const caseId = args[caseIdx + 1];
   const suite = await loadSuite(suiteDir);
   const tc = suite.cases.find((c) => c.id === caseId);
@@ -615,12 +632,7 @@ async function cmdDashboard() {
 
 
 async function cmdDoctor(args: string[]) {
-  const suiteIdx = args.indexOf("--suite");
-  if (suiteIdx === -1 || !args[suiteIdx + 1]) {
-    console.error("Required: --suite <dir>");
-    process.exit(2);
-  }
-  const suiteDir = resolve(args[suiteIdx + 1]);
+  const suiteDir = await resolveSuiteDir(args);
   const issues: string[] = [];
   let suite: Suite;
   try {
@@ -671,12 +683,7 @@ async function cmdDoctor(args: string[]) {
 
 async function cmdMutate(args: string[]) {
   /** Invent adversarial sibling cases: empty, refusal, preamble, wrong-category */
-  const suiteIdx = args.indexOf("--suite");
-  if (suiteIdx === -1 || !args[suiteIdx + 1]) {
-    console.error("Required: --suite <dir>");
-    process.exit(2);
-  }
-  const suiteDir = resolve(args[suiteIdx + 1]);
+  const suiteDir = await resolveSuiteDir(args);
   const suite = await loadSuite(suiteDir);
   const outDir = join(suiteDir, "outputs", "mutants");
   await mkdir(outDir, { recursive: true });
@@ -745,12 +752,7 @@ async function cmdMutate(args: string[]) {
 
 
 async function cmdBadge(args: string[]) {
-  const suiteIdx = args.indexOf("--suite");
-  if (suiteIdx === -1 || !args[suiteIdx + 1]) {
-    console.error("Required: --suite <dir>");
-    process.exit(2);
-  }
-  const suiteDir = resolve(args[suiteIdx + 1]);
+  const suiteDir = await resolveSuiteDir(args);
   let status = "unknown";
   let color = "lightgrey";
   let exit = 0;
