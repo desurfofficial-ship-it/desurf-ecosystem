@@ -1,8 +1,8 @@
 {
   "suites": [
     "contracts",
-    "packages/agent/contracts",
-    "packages/support/contracts"
+    "packages/*/contracts",
+    "apps/**/contracts"
   ],
   "failUnsealed": true,
   "parallel": true,

@@ -3,8 +3,9 @@
  * Desurf Ecosystem CLI v2.0
  * Offline-first • Parallel • Typed judges (Jev-inspired) • Agent trajectories
  */
-import { readFile, writeFile, mkdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { readFile, writeFile, mkdir, readdir, access } from "node:fs/promises";
+import { execSync } from "node:child_process";
+import { join, resolve, relative } from "node:path";
 import {
   runSuite,
   makeFingerprint,
@@ -16,7 +17,7 @@ import {
 } from "desurf-core";
 
 /** CLI package version — keep in sync with packages/cli/package.json */
-const CLI_VERSION = "2.5.0";
+const CLI_VERSION = "2.5.1";
 
 type DesurfConfig = {
   suites?: string[];
@@ -25,6 +26,100 @@ type DesurfConfig = {
   junit?: string;
   summary?: boolean;
 };
+
+
+// Expand simple globs: packages/*/contracts or apps/**/contracts
+async function expandSuitePatterns(patterns: string[], cwd: string): Promise<string[]> {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const pattern of patterns) {
+    if (!pattern.includes("*")) {
+      const abs = resolve(cwd, pattern);
+      if (!seen.has(abs)) { seen.add(abs); out.push(abs); }
+      continue;
+    }
+    // segments
+    const parts = pattern.split(/[/\\]/).filter(Boolean);
+    async function walk(dir: string, pi: number): Promise<void> {
+      if (pi >= parts.length) {
+        try {
+          await access(join(dir, "suite.json"));
+          if (!seen.has(dir)) { seen.add(dir); out.push(dir); }
+        } catch {}
+        return;
+      }
+      const seg = parts[pi];
+      if (seg === "**") {
+        // match zero or more dirs
+        await walk(dir, pi + 1);
+        let entries: string[] = [];
+        try { entries = await readdir(dir); } catch { return; }
+        for (const e of entries) {
+          if (e.startsWith(".")) continue;
+          const next = join(dir, e);
+          try {
+            const st = await readdir(next); // is directory?
+            await walk(next, pi); // stay on **
+          } catch { /* file */ }
+        }
+        return;
+      }
+      if (seg === "*") {
+        let entries: string[] = [];
+        try { entries = await readdir(dir); } catch { return; }
+        for (const e of entries) {
+          if (e.startsWith(".")) continue;
+          await walk(join(dir, e), pi + 1);
+        }
+        return;
+      }
+      await walk(join(dir, seg), pi + 1);
+    }
+    await walk(cwd, 0);
+  }
+  // only keep dirs that have suite.json
+  const final: string[] = [];
+  for (const d of out) {
+    try {
+      await access(join(d, "suite.json"));
+      final.push(d);
+    } catch {}
+  }
+  return final;
+}
+
+/** Suites touched by git changes vs base ref (default origin/main or main). */
+function affectedSuiteDirs(suiteDirs: string[], cwd: string, baseRef?: string): string[] {
+  let diff = "";
+  const refs = baseRef ? [baseRef] : ["origin/main", "main", "origin/master", "master", "HEAD~1"];
+  for (const ref of refs) {
+    try {
+      diff = execSync(`git diff --name-only ${ref}...HEAD`, { cwd, encoding: "utf8" });
+      break;
+    } catch {}
+  }
+  if (!diff.trim()) {
+    try {
+      diff = execSync("git diff --name-only HEAD", { cwd, encoding: "utf8" });
+    } catch {
+      return suiteDirs; // not a git repo → run all
+    }
+  }
+  const files = new Set(diff.split("\n").map((f) => f.trim()).filter(Boolean));
+  if (files.size === 0) return []; // nothing changed
+  return suiteDirs.filter((dir) => {
+    const rel = relative(cwd, dir).replace(/\\/g, "/");
+    for (const f of files) {
+      const nf = f.replace(/\\/g, "/");
+      if (nf === rel || nf.startsWith(rel + "/") || rel.startsWith(nf.replace(/\/suite\.json$/, ""))) {
+        return true;
+      }
+      // any change under suite path
+      if (nf.startsWith(rel + "/") || (rel && nf.includes(rel))) return true;
+    }
+    return false;
+  });
+}
 
 async function loadConfig(cwd = process.cwd()): Promise<DesurfConfig> {
   for (const name of ["desurf.config.json", ".desurfrc.json"]) {
@@ -105,7 +200,9 @@ Usage:
   desurf version
 
 Test flags:
-  --all             run every suite in desurf.config.json
+  --all             run every suite in desurf.config.json (globs ok)
+  --affected        only suites touched vs git base (see --base)
+  --base <ref>      git ref for --affected (default: origin/main)
   --json            machine-readable SuiteResult
   --junit <file>    write JUnit XML (CI/enterprise)
   --summary         markdown summary (GitHub Step Summary aware)
@@ -149,20 +246,31 @@ async function cmdTest(args: string[]) {
   const cfg = await loadConfig();
   const suiteIdx = args.indexOf("--suite");
   let suiteDirs: string[] = [];
+  const cwd = process.cwd();
   if (suiteIdx >= 0 && args[suiteIdx + 1]) {
-    suiteDirs = [resolve(args[suiteIdx + 1])];
-  } else if (args.includes("--all") && cfg.suites?.length) {
-    suiteDirs = cfg.suites.map((s) => resolve(s));
-  } else if (cfg.suites?.length === 1) {
-    suiteDirs = [resolve(cfg.suites[0])];
+    suiteDirs = await expandSuitePatterns([args[suiteIdx + 1]], cwd);
+  } else if ((args.includes("--all") || args.includes("--affected")) && cfg.suites?.length) {
+    suiteDirs = await expandSuitePatterns(cfg.suites, cwd);
+  } else if (cfg.suites?.length) {
+    suiteDirs = await expandSuitePatterns(cfg.suites, cwd);
   } else {
-    // discover defaults
     for (const d of ["contracts", "desurf-suite", ".desurf"]) {
       try {
         await readFile(join(resolve(d), "suite.json"), "utf8");
         suiteDirs = [resolve(d)];
         break;
       } catch {}
+    }
+  }
+  if (args.includes("--affected")) {
+    const baseIdx = args.indexOf("--base");
+    const baseRef = baseIdx >= 0 ? args[baseIdx + 1] : undefined;
+    const before = suiteDirs.length;
+    suiteDirs = affectedSuiteDirs(suiteDirs, cwd, baseRef);
+    console.log(`Desurf: --affected ${suiteDirs.length}/${before} suite(s)`);
+    if (suiteDirs.length === 0) {
+      console.log("Desurf: no affected suites — exit 0");
+      process.exit(0);
     }
   }
   if (suiteDirs.length === 0) {

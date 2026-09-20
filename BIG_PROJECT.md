@@ -3,7 +3,7 @@
 ## Goal
 Use Desurf as the **offline behavioral regression gate** across a monorepo / multi-team product — same role as unit tests on the critical path.
 
-## Shipped for scale (v2.5)
+## Shipped for scale (v2.5.1)
 
 | Capability | How |
 |------------|-----|
@@ -13,6 +13,9 @@ Use Desurf as the **offline behavioral regression gate** across a monorepo / mul
 | PR visibility | `--summary` + `GITHUB_STEP_SUMMARY` |
 | Incremental | `--changed` (only drifted seals) |
 | Parallel | default on; `--no-parallel` to disable |
+| Glob suites | `packages/*/contracts`, `apps/**/contracts` in config |
+| Affected only | `desurf test --affected [--base origin/main]` |
+| Windows paths | backslashes normalized to portable form |
 | Path safety | containment, symlink check, size caps |
 
 ## Minimum setup (monorepo)
@@ -47,8 +50,8 @@ CI:
 4. **No flaky confidence-as-gate** — policy: `json_schema` + `required`/`forbidden`/`choice` for merge gates; `confidence` advisory only.
 
 ### P1 — scale & ops
-5. **Suite glob expansion** — `"packages/*/contracts"` in config (today: explicit paths).
-6. **Shard / only-affected packages** — integrate with Nx `affected` or git diff → suite list.
+5. ~~Suite glob expansion~~ **Done** (`*` / `**` in config).
+6. ~~Affected suites~~ **Done** (`--affected`); deeper Nx integration still optional.
 7. **Baseline history** — keep last N sealed fingerprints; `desurf diff` across versions.
 8. **Signed attestations** — optional offline-verifiable “this release passed suite X @ commit”.
 

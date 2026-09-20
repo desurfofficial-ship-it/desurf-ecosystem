@@ -19,16 +19,15 @@ async function safeJoin(suiteDir: string, rel: string, label: string): Promise<s
   if (!rel || typeof rel !== "string") {
     throw new Error(`Desurf: invalid ${label} path`);
   }
+  rel = rel.replace(/\\/g, "/");
   if (isAbsolute(rel) || rel.includes("\0")) {
     throw new Error(`Desurf: ${label} path must be relative and non-null: ${rel}`);
   }
-  if (rel.includes("\\")) {
-    throw new Error(`Desurf: ${label} path must use forward slashes only: ${rel}`);
-  }
   const root = resolve(suiteDir);
-  const full = resolve(root, rel);
+  const full = resolve(root, ...rel.split("/").filter(Boolean));
   const relToRoot = relative(root, full);
-  if (relToRoot.startsWith("..") || isAbsolute(relToRoot)) {
+  const norm = relToRoot.replace(/\\/g, "/");
+  if (norm.startsWith("..") || isAbsolute(relToRoot)) {
     throw new Error(`Desurf: ${label} path escapes suite directory: ${rel}`);
   }
   try {
