@@ -2,8 +2,8 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { resolve, relative, isAbsolute } from "node:path";
 import { evaluateAll } from "./assertions.js";
 import { checkDrift } from "./fingerprint.js";
-const MAX_OUTPUT_BYTES = 2_000_000; // 2MB hard cap per cassette
-/** Ensure rel path resolves inside suiteDir (no traversal). */
+const MAX_OUTPUT_BYTES = 2_000_000;
+const MAX_CASES = 2000;
 async function safeJoin(suiteDir, rel, label) {
     if (!rel || typeof rel !== "string") {
         throw new Error(`Desurf: invalid ${label} path`);
@@ -17,7 +17,6 @@ async function safeJoin(suiteDir, rel, label) {
     if (relToRoot.startsWith("..") || isAbsolute(relToRoot)) {
         throw new Error(`Desurf: ${label} path escapes suite directory: ${rel}`);
     }
-    // Reject symlink escape: realpath of file must stay under realpath of suite
     try {
         const rootReal = await realpath(root);
         try {
@@ -30,7 +29,6 @@ async function safeJoin(suiteDir, rel, label) {
         catch (e) {
             if (e?.message?.startsWith("Desurf:"))
                 throw e;
-            // file may not exist yet — OK for missing cassette
         }
     }
     catch (e) {
@@ -46,7 +44,15 @@ function validateCaseId(id) {
 }
 async function loadText(suiteDir, rel, label) {
     const path = await safeJoin(suiteDir, rel, label);
-    return readFile(path, "utf8");
+    try {
+        return await readFile(path, "utf8");
+    }
+    catch (e) {
+        if (e?.code === "ENOENT") {
+            throw new Error(`Desurf: missing ${label} file: ${rel}`);
+        }
+        throw new Error(`Desurf: cannot read ${label} (${e?.code || e?.message || e})`);
+    }
 }
 async function loadCassette(suiteDir, tc) {
     const outPath = await safeJoin(suiteDir, tc.output, "output");
@@ -105,6 +111,19 @@ export async function runCase(suiteDir, tc, opts = {}) {
             };
         }
         const results = evaluateAll(output, tc.assertions, cassette.trajectory);
+        // Unknown assertion types → ERROR not REGRESSION
+        const unknown = results.filter((r) => String(r.message || "").startsWith("unknown assertion type"));
+        if (unknown.length > 0) {
+            return {
+                id: tc.id,
+                reliability: "ERROR",
+                cassetteState: state,
+                assertions: results,
+                durationMs: performance.now() - t0,
+                error: unknown[0].message,
+                drift: driftCheck.drifted,
+            };
+        }
         const allPass = results.every((r) => r.passed);
         const reliability = allPass ? "PASS" : "REGRESSION";
         return {
@@ -132,12 +151,24 @@ export async function runSuite(suiteDir, suite, opts = {}) {
     if (!suite?.cases || !Array.isArray(suite.cases)) {
         throw new Error("Desurf: suite.cases must be an array");
     }
-    if (suite.cases.length > 2000) {
-        throw new Error(`Desurf: suite has ${suite.cases.length} cases (max 2000)`);
+    if (suite.cases.length > MAX_CASES) {
+        throw new Error(`Desurf: suite has ${suite.cases.length} cases (max ${MAX_CASES})`);
     }
-    const cases = opts.caseFilter
-        ? suite.cases.filter((c) => c.id === opts.caseFilter)
-        : suite.cases;
+    // Duplicate case ids
+    const seen = new Set();
+    for (const c of suite.cases) {
+        if (seen.has(c.id)) {
+            throw new Error(`Desurf: duplicate case id "${c.id}"`);
+        }
+        seen.add(c.id);
+    }
+    let cases = suite.cases;
+    if (opts.caseFilter) {
+        cases = suite.cases.filter((c) => c.id === opts.caseFilter);
+        if (cases.length === 0) {
+            throw new Error(`Desurf: case not found: "${opts.caseFilter}" (suite has ${suite.cases.length} case(s))`);
+        }
+    }
     let results;
     if (opts.parallel !== false && cases.length > 1) {
         results = await Promise.all(cases.map((c) => runCase(suiteDir, c)));
