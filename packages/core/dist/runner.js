@@ -11,6 +11,9 @@ async function safeJoin(suiteDir, rel, label) {
     if (isAbsolute(rel) || rel.includes("\0")) {
         throw new Error(`Desurf: ${label} path must be relative and non-null: ${rel}`);
     }
+    if (rel.includes("\\")) {
+        throw new Error(`Desurf: ${label} path must use forward slashes only: ${rel}`);
+    }
     const root = resolve(suiteDir);
     const full = resolve(root, rel);
     const relToRoot = relative(root, full);
@@ -84,6 +87,12 @@ export async function runCase(suiteDir, tc, opts = {}) {
     const t0 = performance.now();
     try {
         validateCaseId(tc.id);
+        if (tc.assertions != null && !Array.isArray(tc.assertions)) {
+            throw new Error(`Desurf: case "${tc.id}" assertions must be an array`);
+        }
+        if (Array.isArray(tc.assertions) && tc.assertions.length > 200) {
+            throw new Error(`Desurf: case "${tc.id}" has ${tc.assertions.length} assertions (max 200)`);
+        }
         const prompt = await loadText(suiteDir, tc.prompt, "prompt");
         const input = await loadText(suiteDir, tc.input, "input");
         const { cassette, state } = await loadCassette(suiteDir, tc);
