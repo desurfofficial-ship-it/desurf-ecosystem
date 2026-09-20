@@ -1,6 +1,6 @@
 {
   "name": "desurf-core",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,8 +12,8 @@
     "test": "node --experimental-vm-modules node_modules/vitest/vitest.mjs run 2>/dev/null || echo 'vitest optional'"
   },
   "devDependencies": {
-    "typescript": "^5.7.2",
-    "@types/node": "^22.10.0"
+    "@types/node": "^22.20.4",
+    "typescript": "^5.7.2"
   },
   "publishConfig": {
     "access": "public"

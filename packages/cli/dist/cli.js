@@ -17,7 +17,9 @@ Usage:
   desurf record  --suite <dir> --provider openrouter [--model <id>]
   desurf diff    --suite <dir> --case <id>
   desurf plugins
-  desurf dashboard   # print local dashboard URL hint
+  desurf dashboard
+  desurf doctor  --suite <dir>   # health + security checks
+  desurf mutate  --suite <dir>   # invent adversarial sibling cases
   desurf version
 
 Exit codes: 0=PASS  1=REGRESSION/FLAKY  2=ERROR (incl. stale sealed provenance)
@@ -269,6 +271,107 @@ async function cmdDashboard() {
     console.log(`  Then open http://localhost:${port}`);
     console.log(`  Dashboard reads suite results you drop into public/results.json`);
 }
+async function cmdDoctor(args) {
+    const suiteIdx = args.indexOf("--suite");
+    if (suiteIdx === -1 || !args[suiteIdx + 1]) {
+        console.error("Required: --suite <dir>");
+        process.exit(2);
+    }
+    const suiteDir = resolve(args[suiteIdx + 1]);
+    const issues = [];
+    let suite;
+    try {
+        suite = await loadSuite(suiteDir);
+    }
+    catch (e) {
+        console.error(e?.message || e);
+        process.exit(2);
+    }
+    console.log(`Desurf doctor — ${suite.name} (${suite.cases.length} cases)\n`);
+    for (const tc of suite.cases) {
+        if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(tc.id)) {
+            issues.push(`case id unsafe: ${tc.id}`);
+        }
+        for (const label of ["input", "prompt", "output"]) {
+            const rel = tc[label];
+            if (!rel || rel.includes("..") || rel.startsWith("/") || rel.includes("\\0")) {
+                issues.push(`${tc.id}: ${label} path unsafe: ${rel}`);
+            }
+        }
+        for (const a of tc.assertions || []) {
+            if (a.type === "regex") {
+                const pat = a.pattern || String(a.value || "");
+                if (/\([^)]*[+*][^)]*\)[+*{]/.test(pat)) {
+                    issues.push(`${tc.id}: regex ReDoS risk: ${pat}`);
+                }
+            }
+        }
+        // sealed without sidecar
+        try {
+            await readFile(join(suiteDir, tc.output), "utf8");
+            try {
+                await readFile(join(suiteDir, tc.output + ".desurf"), "utf8");
+            }
+            catch {
+                issues.push(`${tc.id}: output exists but UNSEALED (no .desurf) — prompt drift invisible`);
+            }
+        }
+        catch {
+            issues.push(`${tc.id}: missing output cassette`);
+        }
+    }
+    if (issues.length === 0) {
+        console.log("✓ no issues found");
+        process.exit(0);
+    }
+    for (const i of issues)
+        console.log(`! ${i}`);
+    console.log(`\n${issues.length} issue(s)`);
+    process.exit(issues.some((x) => x.includes("unsafe") || x.includes("ReDoS")) ? 2 : 1);
+}
+async function cmdMutate(args) {
+    /** Invent adversarial sibling cases: empty, refusal, preamble, wrong-category */
+    const suiteIdx = args.indexOf("--suite");
+    if (suiteIdx === -1 || !args[suiteIdx + 1]) {
+        console.error("Required: --suite <dir>");
+        process.exit(2);
+    }
+    const suiteDir = resolve(args[suiteIdx + 1]);
+    const suite = await loadSuite(suiteDir);
+    const outDir = join(suiteDir, "outputs", "mutants");
+    await mkdir(outDir, { recursive: true });
+    const mutants = [];
+    for (const tc of suite.cases.slice(0, 5)) {
+        const variants = [
+            { suffix: "empty", body: "" },
+            { suffix: "refusal", body: "I am an AI and cannot help with that request." },
+            { suffix: "preamble", body: "Sure! Here is the JSON:\n{\"category\":\"other\",\"explanation\":\"noise\"}\nHope that helps!" },
+            { suffix: "wrong", body: JSON.stringify({ category: "technical", explanation: "mutated wrong bucket" }) },
+        ];
+        for (const v of variants) {
+            const id = `${tc.id}__mut_${v.suffix}`.replace(/[^a-zA-Z0-9._-]/g, "_").slice(0, 128);
+            const outRel = `outputs/mutants/${id}.txt`;
+            await writeFile(join(suiteDir, outRel), v.body);
+            mutants.push({
+                id,
+                input: tc.input,
+                prompt: tc.prompt,
+                output: outRel,
+                assertions: tc.assertions,
+            });
+        }
+    }
+    const mutated = {
+        name: suite.name + "-mutants",
+        version: suite.version || "2.0.0",
+        cases: mutants,
+    };
+    const mutPath = join(suiteDir, "suite.mutants.json");
+    await writeFile(mutPath, JSON.stringify(mutated, null, 2));
+    console.log(`Invented ${mutants.length} adversarial cases → ${mutPath}`);
+    console.log(`Run: desurf test --suite ${suiteDir}  (or point suite.json at suite.mutants.json)`);
+    console.log(`Tip: copy suite.mutants.json over suite.json to gate against these failures.`);
+}
 async function main() {
     const [cmd, ...rest] = process.argv.slice(2);
     if (!cmd || cmd === "help" || cmd === "--help") {
@@ -293,6 +396,10 @@ async function main() {
         return cmdPlugins();
     if (cmd === "dashboard")
         return cmdDashboard();
+    if (cmd === "doctor")
+        return cmdDoctor(rest);
+    if (cmd === "mutate")
+        return cmdMutate(rest);
     console.error(`Unknown command: ${cmd}`);
     console.log(HELP);
     process.exit(2);

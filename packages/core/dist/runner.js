@@ -1,20 +1,68 @@
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { readFile, realpath, stat } from "node:fs/promises";
+import { resolve, relative, isAbsolute } from "node:path";
 import { evaluateAll } from "./assertions.js";
 import { checkDrift } from "./fingerprint.js";
-async function loadText(suiteDir, rel) {
-    return readFile(join(suiteDir, rel), "utf8");
+const MAX_OUTPUT_BYTES = 2_000_000; // 2MB hard cap per cassette
+/** Ensure rel path resolves inside suiteDir (no traversal). */
+async function safeJoin(suiteDir, rel, label) {
+    if (!rel || typeof rel !== "string") {
+        throw new Error(`Desurf: invalid ${label} path`);
+    }
+    if (isAbsolute(rel) || rel.includes("\0")) {
+        throw new Error(`Desurf: ${label} path must be relative and non-null: ${rel}`);
+    }
+    const root = resolve(suiteDir);
+    const full = resolve(root, rel);
+    const relToRoot = relative(root, full);
+    if (relToRoot.startsWith("..") || isAbsolute(relToRoot)) {
+        throw new Error(`Desurf: ${label} path escapes suite directory: ${rel}`);
+    }
+    // Reject symlink escape: realpath of file must stay under realpath of suite
+    try {
+        const rootReal = await realpath(root);
+        try {
+            const fileReal = await realpath(full);
+            const rel2 = relative(rootReal, fileReal);
+            if (rel2.startsWith("..") || isAbsolute(rel2)) {
+                throw new Error(`Desurf: ${label} resolves outside suite (symlink?): ${rel}`);
+            }
+        }
+        catch (e) {
+            if (e?.message?.startsWith("Desurf:"))
+                throw e;
+            // file may not exist yet — OK for missing cassette
+        }
+    }
+    catch (e) {
+        if (e?.message?.startsWith("Desurf:"))
+            throw e;
+    }
+    return full;
+}
+function validateCaseId(id) {
+    if (!id || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(id)) {
+        throw new Error(`Desurf: invalid case id "${id}" (use alphanumeric, . _ - ; max 128; no path segments)`);
+    }
+}
+async function loadText(suiteDir, rel, label) {
+    const path = await safeJoin(suiteDir, rel, label);
+    return readFile(path, "utf8");
 }
 async function loadCassette(suiteDir, tc) {
-    const outPath = join(suiteDir, tc.output);
+    const outPath = await safeJoin(suiteDir, tc.output, "output");
     let output = "";
     try {
+        const st = await stat(outPath);
+        if (st.size > MAX_OUTPUT_BYTES) {
+            throw new Error(`Desurf: output exceeds ${MAX_OUTPUT_BYTES} bytes (${st.size}) — refuse to load`);
+        }
         output = await readFile(outPath, "utf8");
     }
-    catch {
+    catch (e) {
+        if (e?.message?.startsWith("Desurf:"))
+            throw e;
         return { cassette: { output: "" }, state: "UNSEALED" };
     }
-    // Look for sidecar .desurf
     const side = outPath + ".desurf";
     try {
         const raw = await readFile(side, "utf8");
@@ -29,8 +77,9 @@ async function loadCassette(suiteDir, tc) {
 export async function runCase(suiteDir, tc, opts = {}) {
     const t0 = performance.now();
     try {
-        const prompt = await loadText(suiteDir, tc.prompt);
-        const input = await loadText(suiteDir, tc.input);
+        validateCaseId(tc.id);
+        const prompt = await loadText(suiteDir, tc.prompt, "prompt");
+        const input = await loadText(suiteDir, tc.input, "input");
         const { cassette, state } = await loadCassette(suiteDir, tc);
         const output = opts.liveOutput ?? cassette.output;
         if (!output) {
@@ -44,7 +93,6 @@ export async function runCase(suiteDir, tc, opts = {}) {
             };
         }
         const driftCheck = checkDrift(cassette.fingerprint, prompt, input);
-        // Sealed + drift → hard ERROR (original contract)
         if (state === "SEALED" && driftCheck.drifted) {
             return {
                 id: tc.id,
@@ -81,6 +129,12 @@ export async function runCase(suiteDir, tc, opts = {}) {
 }
 export async function runSuite(suiteDir, suite, opts = {}) {
     const t0 = performance.now();
+    if (!suite?.cases || !Array.isArray(suite.cases)) {
+        throw new Error("Desurf: suite.cases must be an array");
+    }
+    if (suite.cases.length > 2000) {
+        throw new Error(`Desurf: suite has ${suite.cases.length} cases (max 2000)`);
+    }
     const cases = opts.caseFilter
         ? suite.cases.filter((c) => c.id === opts.caseFilter)
         : suite.cases;
