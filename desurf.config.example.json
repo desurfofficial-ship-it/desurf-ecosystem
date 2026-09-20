@@ -1,0 +1,11 @@
+{
+  "suites": [
+    "contracts",
+    "packages/agent/contracts",
+    "packages/support/contracts"
+  ],
+  "failUnsealed": true,
+  "parallel": true,
+  "junit": "reports/desurf-junit.xml",
+  "summary": true
+}

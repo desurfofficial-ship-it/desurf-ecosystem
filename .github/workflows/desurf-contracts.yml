@@ -13,11 +13,19 @@ jobs:
           node-version: "20"
       - name: Install Desurf
         run: npm install -g desurf-cli@2
-      - name: Contract suite
+      - name: Run contract suites
         run: |
-          if [ -d ./examples ]; then
-            desurf test --suite ./examples --fail-unsealed || true
+          mkdir -p reports
+          if [ -f desurf.config.json ]; then
+            desurf test --all --junit reports/desurf.xml --summary --fail-unsealed
+          elif [ -d contracts ]; then
+            desurf test --suite ./contracts --junit reports/desurf.xml --summary --fail-unsealed
+          else
+            echo "No desurf.config.json or ./contracts — skip"
           fi
-          if [ -d ./contracts ]; then
-            desurf test --suite ./contracts --fail-unsealed
-          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: desurf-junit
+          path: reports/
+          if-no-files-found: ignore

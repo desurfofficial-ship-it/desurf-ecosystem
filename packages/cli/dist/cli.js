@@ -7,7 +7,60 @@ import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { runSuite, makeFingerprint, checkDrift, VERSION, containPath, } from "desurf-core";
 /** CLI package version — keep in sync with packages/cli/package.json */
-const CLI_VERSION = "2.4.3";
+const CLI_VERSION = "2.5.0";
+async function loadConfig(cwd = process.cwd()) {
+    for (const name of ["desurf.config.json", ".desurfrc.json"]) {
+        try {
+            const raw = await readFile(join(cwd, name), "utf8");
+            return JSON.parse(raw);
+        }
+        catch { }
+    }
+    return {};
+}
+function junitXml(result) {
+    const cases = result.results
+        .map((r) => {
+        const name = r.id.replace(/"/g, "'");
+        if (r.reliability === "PASS") {
+            return `    <testcase classname="${result.name}" name="${name}" time="${(r.durationMs / 1000).toFixed(3)}"/>`;
+        }
+        const msg = (r.error || r.assertions.filter((a) => !a.passed).map((a) => a.message).join("; ") || r.reliability)
+            .replace(/&/g, "&amp;")
+            .replace(/</g, "&lt;")
+            .replace(/"/g, "&quot;");
+        const tag = r.reliability === "ERROR" ? "error" : "failure";
+        return `    <testcase classname="${result.name}" name="${name}" time="${(r.durationMs / 1000).toFixed(3)}">\n      <${tag} message="${msg}"/>\n    </testcase>`;
+    })
+        .join("\n");
+    return `<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="${result.name}" tests="${result.results.length}" failures="${result.regression}" errors="${result.error}" time="${(result.totalMs / 1000).toFixed(3)}">
+${cases}
+</testsuite>
+`;
+}
+function markdownSummary(result) {
+    const status = result.exitCode === 0 ? "PASS" : result.exitCode === 1 ? "REGRESSION" : "ERROR";
+    const lines = [
+        `### Desurf — ${result.name}: **${status}**`,
+        ``,
+        `| Metric | Count |`,
+        `|--------|------:|`,
+        `| Passed | ${result.passed} |`,
+        `| Regression | ${result.regression} |`,
+        `| Error | ${result.error} |`,
+        `| Duration | ${result.totalMs.toFixed(0)}ms |`,
+        ``,
+    ];
+    const bad = result.results.filter((r) => r.reliability !== "PASS");
+    if (bad.length) {
+        lines.push(`Failed cases:`);
+        for (const r of bad.slice(0, 20)) {
+            lines.push(`- \`${r.id}\` — ${r.reliability}${r.error ? `: ${r.error}` : ""}`);
+        }
+    }
+    return lines.join("\n");
+}
 const HELP = `
 Desurf CLI ${CLI_VERSION}  (engine ${VERSION})
 Offline-first behavioral contracts for prompts & agents.
@@ -31,19 +84,18 @@ Usage:
   desurf version
 
 Test flags:
+  --all             run every suite in desurf.config.json
   --json            machine-readable SuiteResult
+  --junit <file>    write JUnit XML (CI/enterprise)
+  --summary         markdown summary (GitHub Step Summary aware)
   --fail-unsealed   UNSEALED pass → ERROR (team policy)
   --changed         only cases whose prompt/input changed vs seal
   --case <id>       single case
   --no-parallel     disable parallel execution
 
-Assertions (in suite.json):
-  required / forbidden   substring must/must-not appear
-  regex                  pattern match (ReDoS-safe)
-  json_schema            lightweight object/required keys
-  choice                 must pick expected label (Jev-style)
-  confidence             min score on options (heuristic; not a real judge)
-  tool_call / trajectory agent tool sequence contracts
+Big projects:
+  desurf.config.json = { "suites": ["packages/*/contracts"], "failUnsealed": true }
+  desurf test --all --junit report.xml --summary
 
 Exit codes: 0=PASS  1=REGRESSION/FLAKY  2=ERROR (stale seal, policy, config)
 `;
@@ -73,90 +125,135 @@ async function loadSuite(dir) {
     }
 }
 async function cmdTest(args) {
+    const cfg = await loadConfig();
     const suiteIdx = args.indexOf("--suite");
-    if (suiteIdx === -1 || !args[suiteIdx + 1]) {
-        console.error("Desurf: required --suite <dir>");
+    let suiteDirs = [];
+    if (suiteIdx >= 0 && args[suiteIdx + 1]) {
+        suiteDirs = [resolve(args[suiteIdx + 1])];
+    }
+    else if (args.includes("--all") && cfg.suites?.length) {
+        suiteDirs = cfg.suites.map((s) => resolve(s));
+    }
+    else if (cfg.suites?.length === 1) {
+        suiteDirs = [resolve(cfg.suites[0])];
+    }
+    else {
+        // discover defaults
+        for (const d of ["contracts", "desurf-suite", ".desurf"]) {
+            try {
+                await readFile(join(resolve(d), "suite.json"), "utf8");
+                suiteDirs = [resolve(d)];
+                break;
+            }
+            catch { }
+        }
+    }
+    if (suiteDirs.length === 0) {
+        console.error("Desurf: required --suite <dir> (or desurf.config.json suites, or ./contracts)");
         console.error("  Try: desurf init ./contracts && desurf test --suite ./contracts");
+        console.error("  Big repos: desurf.config.json → { \"suites\": [\"packages/a/contracts\", \"packages/b/contracts\"] } then desurf test --all");
         process.exit(2);
     }
-    const suiteDir = resolve(args[suiteIdx + 1]);
     const caseIdx = args.indexOf("--case");
     const caseFilter = caseIdx >= 0 ? args[caseIdx + 1] : undefined;
-    const parallel = !args.includes("--no-parallel");
+    const parallel = args.includes("--no-parallel") ? false : cfg.parallel !== false;
     const asJson = args.includes("--json");
-    const failUnsealed = args.includes("--fail-unsealed");
+    const failUnsealed = args.includes("--fail-unsealed") || !!cfg.failUnsealed;
     const onlyChanged = args.includes("--changed");
-    const suite = await loadSuite(suiteDir);
-    if (onlyChanged) {
-        const filtered = [];
-        for (const tc of suite.cases) {
-            try {
-                const prompt = await readFile(containPath(suiteDir, tc.prompt, "prompt"), "utf8");
-                const input = await readFile(containPath(suiteDir, tc.input, "input"), "utf8");
-                const side = containPath(suiteDir, tc.output, "output") + ".desurf";
-                let fp = null;
+    const wantSummary = args.includes("--summary") || !!cfg.summary || !!process.env.GITHUB_STEP_SUMMARY;
+    const junitIdx = args.indexOf("--junit");
+    const junitPath = junitIdx >= 0 ? args[junitIdx + 1] : cfg.junit;
+    let worstExit = 0;
+    const allResults = [];
+    for (const suiteDir of suiteDirs) {
+        const suite = await loadSuite(suiteDir);
+        if (onlyChanged) {
+            const filtered = [];
+            for (const tc of suite.cases) {
                 try {
-                    fp = JSON.parse(await readFile(side, "utf8"));
+                    const prompt = await readFile(containPath(suiteDir, tc.prompt, "prompt"), "utf8");
+                    const input = await readFile(containPath(suiteDir, tc.input, "input"), "utf8");
+                    const side = containPath(suiteDir, tc.output, "output") + ".desurf";
+                    let fp = null;
+                    try {
+                        fp = JSON.parse(await readFile(side, "utf8"));
+                    }
+                    catch { }
+                    const drift = checkDrift(fp, prompt, input);
+                    if (!fp || drift.drifted)
+                        filtered.push(tc);
                 }
-                catch { }
-                const drift = checkDrift(fp, prompt, input);
-                if (!fp || drift.drifted)
+                catch {
                     filtered.push(tc);
+                }
             }
-            catch {
-                filtered.push(tc);
-            }
-        }
-        suite.cases = filtered;
-        if (suite.cases.length === 0) {
-            console.log("Desurf: --changed matched 0 cases (all sealed fingerprints current)");
-            process.exit(0);
-        }
-    }
-    const result = await runSuite(suiteDir, suite, { parallel, caseFilter });
-    if (failUnsealed) {
-        for (const r of result.results) {
-            if (r.cassetteState === "UNSEALED" && r.reliability === "PASS") {
-                r.reliability = "ERROR";
-                r.error = "policy: --fail-unsealed (cassette not sealed)";
-                result.error += 1;
-                result.passed = Math.max(0, result.passed - 1);
-                result.exitCode = 2;
+            suite.cases = filtered;
+            if (suite.cases.length === 0) {
+                console.log(`Desurf: --changed matched 0 cases in ${suiteDir}`);
+                continue;
             }
         }
-    }
-    if (asJson) {
-        console.log(JSON.stringify(result, null, 2));
-        process.exit(result.exitCode);
-    }
-    console.log(`\nDesurf  cli ${CLI_VERSION}  engine ${VERSION}`);
-    console.log(`Suite: ${result.name}  (${result.results.length} cases, ${result.totalMs.toFixed(0)}ms)\n`);
-    for (const r of result.results) {
-        const icon = r.reliability === "PASS" ? "✓" :
-            r.reliability === "REGRESSION" ? "✗" :
-                r.reliability === "FLAKY" ? "~" : "!";
-        console.log(`${icon} ${r.id}`);
-        console.log(`  ${r.reliability}  cassette: ${r.cassetteState}${r.drift ? " (drift detected)" : ""}  ${r.durationMs.toFixed(0)}ms`);
-        if (r.error)
-            console.log(`  ERROR: ${r.error}`);
-        for (const a of r.assertions) {
-            if (!a.passed) {
-                console.log(`  · fail [${a.assertion.type}]: ${a.message}${a.confidence != null ? ` (conf=${a.confidence})` : ""}`);
-            }
-            else if (a.confidence != null) {
-                console.log(`  · ok   [${a.assertion.type}] conf=${a.confidence}`);
+        const result = await runSuite(suiteDir, suite, { parallel, caseFilter });
+        if (failUnsealed) {
+            for (const r of result.results) {
+                if (r.cassetteState === "UNSEALED" && r.reliability === "PASS") {
+                    r.reliability = "ERROR";
+                    r.error = "policy: --fail-unsealed (cassette not sealed)";
+                    result.error += 1;
+                    result.passed = Math.max(0, result.passed - 1);
+                    result.exitCode = 2;
+                }
             }
         }
-        console.log();
+        allResults.push(result);
+        if (result.exitCode > worstExit)
+            worstExit = result.exitCode;
+        if (asJson && suiteDirs.length === 1) {
+            console.log(JSON.stringify(result, null, 2));
+        }
+        else if (!asJson) {
+            console.log(`\nDesurf  cli ${CLI_VERSION}  engine ${VERSION}`);
+            console.log(`Suite: ${result.name}  (${result.results.length} cases, ${result.totalMs.toFixed(0)}ms)  [${suiteDir}]\n`);
+            for (const r of result.results) {
+                const icon = r.reliability === "PASS" ? "✓" :
+                    r.reliability === "REGRESSION" ? "✗" :
+                        r.reliability === "FLAKY" ? "~" : "!";
+                console.log(`${icon} ${r.id}`);
+                console.log(`  ${r.reliability}  cassette: ${r.cassetteState}${r.drift ? " (drift detected)" : ""}  ${r.durationMs.toFixed(0)}ms`);
+                if (r.error)
+                    console.log(`  ERROR: ${r.error}`);
+                for (const a of r.assertions) {
+                    if (!a.passed) {
+                        console.log(`  · fail [${a.assertion.type}]: ${a.message}${a.confidence != null ? ` (conf=${a.confidence})` : ""}`);
+                    }
+                    else if (a.confidence != null) {
+                        console.log(`  · ok   [${a.assertion.type}] conf=${a.confidence}`);
+                    }
+                }
+                console.log();
+            }
+            console.log(`Results: ${result.passed} passed, ${result.flaky} flaky, ${result.regression} regression, ${result.error} error`);
+        }
+        if (junitPath) {
+            const out = suiteDirs.length > 1
+                ? junitPath.replace(/\.xml$/, `-${result.name.replace(/[^a-zA-Z0-9_-]/g, "_")}.xml`)
+                : junitPath;
+            await writeFile(out, junitXml(result));
+            console.log(`Wrote JUnit: ${out}`);
+        }
+        if (wantSummary) {
+            const md = markdownSummary(result);
+            if (process.env.GITHUB_STEP_SUMMARY) {
+                await writeFile(process.env.GITHUB_STEP_SUMMARY, md + "\n", { flag: "a" });
+            }
+            if (args.includes("--summary"))
+                console.log("\n" + md);
+        }
     }
-    console.log(`Results: ${result.passed} passed, ${result.flaky} flaky, ${result.regression} regression, ${result.error} error`);
-    // Ecosystem: optional results dump for dashboard / CI artifacts
-    if (args.includes("--json") || process.env.DESURF_RESULTS) {
-        const outPath = process.env.DESURF_RESULTS || join(suiteDir, "results.json");
-        await writeFile(outPath, JSON.stringify(result, null, 2));
-        console.log(`Wrote ${outPath}`);
+    if (asJson && suiteDirs.length > 1) {
+        console.log(JSON.stringify({ results: allResults, exitCode: worstExit }, null, 2));
     }
-    process.exit(result.exitCode);
+    process.exit(worstExit);
 }
 async function cmdInit(args) {
     const dir = resolve(args[0] || "desurf-suite");
