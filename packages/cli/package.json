@@ -1,6 +1,6 @@
 {
   "name": "desurf-cli",
-  "version": "2.4.2",
+  "version": "2.4.3",
   "type": "module",
   "bin": {
     "desurf": "./dist/cli.js"
@@ -13,7 +13,7 @@
     "build": "tsc"
   },
   "dependencies": {
-    "desurf-core": "^2.3.1"
+    "desurf-core": "^2.3.2"
   },
   "description": "Offline-first behavioral contracts for prompts & agents. CI regression gate with sealed provenance.",
   "keywords": [

@@ -16,7 +16,7 @@ import {
 } from "desurf-core";
 
 /** CLI package version — keep in sync with packages/cli/package.json */
-const CLI_VERSION = "2.4.2";
+const CLI_VERSION = "2.4.3";
 
 const HELP = `
 Desurf CLI ${CLI_VERSION}  (engine ${VERSION})
@@ -85,7 +85,8 @@ async function loadSuite(dir: string): Promise<Suite> {
 async function cmdTest(args: string[]) {
   const suiteIdx = args.indexOf("--suite");
   if (suiteIdx === -1 || !args[suiteIdx + 1]) {
-    console.error("Required: --suite <dir>");
+    console.error("Desurf: required --suite <dir>");
+    console.error("  Try: desurf init ./contracts && desurf test --suite ./contracts");
     process.exit(2);
   }
   const suiteDir = resolve(args[suiteIdx + 1]);
@@ -390,12 +391,11 @@ async function cmdPlugins() {
 }
 
 async function cmdDashboard() {
-  const port = process.env.DESURF_DASHBOARD_PORT || "3847";
-  console.log(`Desurf local dashboard`);
-  console.log(`  Serve packages/web/public with any static server, e.g.:`);
-  console.log(`  npx --yes serve packages/web/public -p ${port}`);
-  console.log(`  Then open http://localhost:${port}`);
-  console.log(`  Dashboard reads suite results you drop into public/results.json`);
+  console.log(`Desurf dashboard (lightweight)`);
+  console.log(`  1. Run:  desurf test --suite ./contracts --json > results.json`);
+  console.log(`  2. Open results.json in any editor or feed it to your CI summary`);
+  console.log(`  3. Optional badge: desurf badge --suite ./contracts`);
+  console.log(`  Hosted UI is not required — offline contracts are the product.`);
 }
 
 

@@ -71,7 +71,7 @@ async function loadText(suiteDir: string, rel: string, label: string): Promise<s
 async function loadCassette(
   suiteDir: string,
   tc: TestCase
-): Promise<{ cassette: Cassette; state: CassetteState }> {
+): Promise<{ cassette: Cassette; state: CassetteState; missing: boolean }> {
   const outPath = await safeJoin(suiteDir, tc.output, "output");
   let output = "";
   try {
@@ -84,16 +84,16 @@ async function loadCassette(
     output = await readFile(outPath, "utf8");
   } catch (e: any) {
     if (e?.message?.startsWith("Desurf:")) throw e;
-    return { cassette: { output: "" }, state: "UNSEALED" };
+    return { cassette: { output: "" }, state: "UNSEALED", missing: true };
   }
   const side = outPath + ".desurf";
   try {
     const raw = await readFile(side, "utf8");
     const fp = JSON.parse(raw);
     const state: CassetteState = fp.state || "SEALED";
-    return { cassette: { output, fingerprint: fp, trajectory: fp.trajectory }, state };
+    return { cassette: { output, fingerprint: fp, trajectory: fp.trajectory }, state, missing: false };
   } catch {
-    return { cassette: { output }, state: "UNSEALED" };
+    return { cassette: { output }, state: "UNSEALED", missing: false };
   }
 }
 
@@ -113,10 +113,11 @@ export async function runCase(
     }
     const prompt = await loadText(suiteDir, tc.prompt, "prompt");
     const input = await loadText(suiteDir, tc.input, "input");
-    const { cassette, state } = await loadCassette(suiteDir, tc);
+    const { cassette, state, missing } = await loadCassette(suiteDir, tc);
 
     const output = opts.liveOutput ?? cassette.output;
-    if (!output) {
+    // Missing file → ERROR. Empty file is valid output (assertions may still fail).
+    if (missing && opts.liveOutput == null) {
       return {
         id: tc.id,
         reliability: "ERROR",
